@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="w_bg">#FFFFFFFF</color>
+    <color name="w_text">#FF17212C</color>
+    <color name="w_muted">#FF5D6B7A</color>
+    <color name="w_accent">#FF1F4E79</color>
+    <color name="w_on_accent">#FFFFFFFF</color>
+    <string name="widget_description">Rendez-vous et tâches du jour</string>
+</resources>

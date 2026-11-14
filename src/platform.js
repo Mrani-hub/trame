@@ -1,6 +1,6 @@
 // Couche plateforme : agendas du téléphone, notifications, fichiers, partage, mises à jour.
 // Sur navigateur (aperçu / tests), tout se replie sur un stockage local sans fonctions natives.
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { CapacitorCalendar } from '@ebarooni/capacitor-calendar';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
@@ -211,3 +211,19 @@ export async function checkUpdate(url) {
 }
 
 export const openUrl = (url) => (native ? Browser.open({ url }) : window.open(url, '_blank'));
+
+// ——— Widget Android (écran d'accueil) ———
+// L'appli écrit widget.json (réglages, tâches, rendez-vous locaux) ; le widget lit aussi directement les agendas du téléphone.
+const TrameWidget = registerPlugin('TrameWidget');
+export async function updateWidget(payload) {
+  if (platform !== 'android') return;
+  try {
+    await Filesystem.writeFile({ path: 'widget.json', directory: Directory.Data, data: JSON.stringify(payload), encoding: Encoding.UTF8 });
+    await TrameWidget.refresh();
+  } catch (e) { console.warn('widget', e); }
+}
+/** Action demandée par le widget à l'ouverture (« capture », « event »…), consommée une seule fois. */
+export async function consumeLaunchAction() {
+  if (platform !== 'android') return null;
+  try { const r = await TrameWidget.consumeLaunch(); return r?.action ? r : null; } catch { return null; }
+}

@@ -16,7 +16,7 @@ import { noteToText, noteToPdf } from './export.js';
 
 // ——— État ———
 const DEFAULT_SETTINGS = {
-  lang: 'fr', calMode: 'both', hijriOffset: 0, digits: 'latin', writeCal: '', hiddenCals: [],
+  lang: 'fr', theme: 'auto', calMode: 'both', hijriOffset: 0, digits: 'latin', writeCal: '', hiddenCals: [],
   contextLead: 15, defaultDur: 60, dayStart: 8, dayEnd: 18, taskDueReminder: true, onboarded: false,
   updateUrl: 'https://raw.githubusercontent.com/Mrani-hub/trame/main/version.json',
 };
@@ -66,7 +66,7 @@ let saveTimer;
 function persist() {
   P.saveData(state.data);
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(rescheduleNotifs, 1200);
+  saveTimer = setTimeout(() => { rescheduleNotifs(); pushWidget(); }, 1200);
 }
 
 // ——— Rendez-vous (agendas du téléphone + rendez-vous locaux) ———
@@ -94,6 +94,7 @@ async function render() {
   setLang(S().lang);
   document.documentElement.lang = S().lang;
   document.documentElement.dir = S().lang === 'ar' ? 'rtl' : 'ltr';
+  applyTheme();
   const range = viewRange();
   await ensureRange(range[0], range[1]);
   const views = { today: viewToday, agenda: viewAgenda, tasks: viewTasks, notes: viewNotes, search: viewSearch };
@@ -111,6 +112,13 @@ async function render() {
       <button data-act="view" data-v="${v}" class="${state.view === v ? 'on' : ''}">${icon(v)}<span>${t(v)}</span></button>`).join('')}
     </nav>`;
   if (state.view === 'search') { const i = $('#q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+}
+
+function applyTheme() {
+  const th = S().theme || 'auto';
+  if (th === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = th;
+  const dark = th === 'dark' || (th === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#0f151c' : '#f4f6f9');
 }
 
 function viewRange() {
@@ -629,6 +637,7 @@ function sheetSettings() {
   return `<div class="sheet-head"><b>${t('settings')}</b><button class="iconbtn" data-act="close">✕</button></div>
   <div class="form" id="setForm">
     <label>${t('sLang')}<select data-set="lang">${opt('fr', s.lang, 'Français')}${opt('ar', s.lang, 'العربية')}</select></label>
+    <label>${t('sTheme')}<select data-set="theme">${opt('auto', s.theme, t('themeAuto'))}${opt('light', s.theme, t('themeLight'))}${opt('dark', s.theme, t('themeDark'))}</select></label>
     <label>${t('sCalMode')}<select data-set="calMode">${opt('both', s.calMode, t('modeBoth'))}${opt('greg', s.calMode, t('modeGreg'))}${opt('hijri', s.calMode, t('modeHijri'))}</select></label>
     <label>${t('sHijriOffset')}<select data-set="hijriOffset" data-num="1">${[-2, -1, 0, 1, 2].map((n) => opt(n, s.hijriOffset, (n > 0 ? '+' : '') + n)).join('')}</select>
       <small>${t('sHijriHint')} — ${esc(dateLabel(new Date(), s, { year: true }))}</small></label>
@@ -640,6 +649,7 @@ function sheetSettings() {
     <label>${t('sDefaultDur')}<select data-set="defaultDur" data-num="1">${[15, 30, 45, 60, 90, 120].map((m) => opt(m, s.defaultDur, D(durationLabel(m, s.lang)))).join('')}</select></label>
     <div class="two"><label>${t('sDayHours')}<select data-set="dayStart" data-num="1">${[6, 7, 8, 9, 10].map((h) => opt(h, s.dayStart, D(h + ':00'))).join('')}</select></label>
       <label>&nbsp;<select data-set="dayEnd" data-num="1">${[15, 16, 17, 18, 19, 20].map((h) => opt(h, s.dayEnd, D(h + ':00'))).join('')}</select></label></div>
+    ${P.platform === 'android' ? `<p class="hint">${t('widgetHint')}</p>` : ''}
     <h3>${t('sNotif')}</h3>
     <label>${t('sLead')}<select data-set="contextLead" data-num="1">${opt(0, s.contextLead, t('off'))}${[5, 10, 15, 30, 60].map((m) => opt(m, s.contextLead, D(t('minutesBefore', m)))).join('')}</select></label>
     <label class="check"><input type="checkbox" data-set="taskDueReminder" ${s.taskDueReminder ? 'checked' : ''}> ${t('sTaskReminder')}</label>
@@ -661,6 +671,7 @@ async function applySetting(el) {
   S()[k] = v;
   if (k === 'hijriOffset' || k === 'calMode') state.monthCal = null;
   persist();
+  if (k === 'theme') applyTheme();
   if (k === 'lang' || k === 'calMode' || k === 'hijriOffset' || k === 'digits') { setLang(S().lang); renderSheet(); }
   render();
 }
@@ -670,6 +681,37 @@ function sheetWelcome() {
   return `<div class="welcome"><span class="logo big">T</span><h2>${t('welcome')}</h2><p>${t('welcomeText')}</p>
     <div class="seg center"><button data-act="wlang" data-l="fr" class="${S().lang === 'fr' ? 'on' : ''}">Français</button><button data-act="wlang" data-l="ar" class="${S().lang === 'ar' ? 'on' : ''}">العربية</button></div>
     <button class="btn primary wide" data-act="wstart">${t('start_')}</button></div>`;
+}
+
+// ——— Widget ———
+function pushWidget() {
+  if (P.platform !== 'android') return;
+  const s = S(), from = startOfDay(new Date()).getTime() - 7 * DAY;
+  P.updateWidget({
+    v: 1, lang: s.lang, calMode: s.calMode, hijriOffset: s.hijriOffset, digits: s.digits, hiddenCals: s.hiddenCals,
+    calPerm: state.calPerm,
+    localEvents: state.data.localEvents.filter((e) => e.end > from).map((e) => ({ id: e.id, title: e.title, start: e.start, end: e.end, allDay: !!e.allDay, location: e.location || '' })),
+    tasks: state.data.tasks.filter((x) => !x.done && (x.due || x.remindAt || x.plannedStart)).map((x) => ({
+      id: x.id, title: x.title, high: x.priority === 'high', reminder: !!x.isReminder,
+      due: x.due || null, remindAt: x.remindAt || null, plannedStart: x.plannedStart || null, durationMin: x.durationMin || null,
+    })),
+  });
+}
+
+async function handleLaunch() {
+  const a = await P.consumeLaunchAction();
+  if (!a) return;
+  if (a.action === 'capture') { state.view = 'today'; await render(); $('#capIn')?.focus(); }
+  if (a.action === 'day' && a.day) { state.view = 'agenda'; state.agendaMode = 'month'; state.cursor = startOfDay(new Date(+a.day)); state.selDay = state.cursor; await render(); }
+  if (a.action === 'event' && a.start) {
+    const st = +a.start;
+    await ensureRange(startOfDay(st).getTime(), endOfDay(st).getTime(), true);
+    const e = state.events.find((x) => (a.local ? x.id === a.id && x.source === 'local' : x.id === String(a.id)) && x.start === st)
+      || state.events.find((x) => x.id === String(a.id));
+    state.view = 'today'; await render();
+    if (e) openSheet({ kind: 'event', ev: e });
+  }
+  if (a.action === 'task' && a.id) openTaskEditor(a.id);
 }
 
 // ——— Notifications programmées ———
@@ -707,7 +749,7 @@ const actions = {
     state.calPerm = await P.calendarPermission(true);
     if (state.calPerm) { state.calendars = await P.listCalendars(); if (!S().writeCal) { const w = state.calendars.find((c) => c.writable); S().writeCal = w ? w.id : 'local'; persist(); } }
     else toast(t('calDenied'));
-    invalidate(); if (state.sheet) renderSheet(); render();
+    invalidate(); if (state.sheet) renderSheet(); render(); pushWidget();
   },
   review: () => openSheet({ kind: 'review' }),
   rv: (b) => {
@@ -885,7 +927,7 @@ async function init() {
       if (x.kind === 'event') { state.view = 'today'; await render(); openEventByKey(x.key, x.start); }
       if (x.kind === 'task') openTaskEditor(x.id);
     });
-    P.App.addListener('resume', async () => { invalidate(); await render(); rescheduleNotifs(); });
+    P.App.addListener('resume', async () => { invalidate(); await render(); rescheduleNotifs(); pushWidget(); handleLaunch(); });
     P.App.addListener('backButton', () => {
       if ($('#shareMenu')) $('#shareMenu').remove();
       else if (state.sheet) { closeSheet(); render(); }
@@ -893,9 +935,12 @@ async function init() {
       else P.App.exitApp();
     });
   }
+  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => applyTheme());
   await render();
   if (!S().onboarded) openSheet({ kind: 'welcome' });
   rescheduleNotifs();
+  pushWidget();
+  handleLaunch();
 }
 
 init();

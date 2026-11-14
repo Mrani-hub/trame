@@ -75,13 +75,13 @@ Gardez précieusement une copie de `trame-release.jks` et de sa phrase secrète 
 ## 4. Publier une mise à jour
 
 ```
-npm run release 0.2.0 "Corrections et nouvelles fonctions"
-git commit -am "Version 0.2.0"
-git tag v0.2.0
-git push && git push --tags
+npm run release 0.3.0 "Corrections et nouvelles fonctions"
+git commit -am "Version 0.3.0"
+git push
 ```
 
-L'étiquette crée une **Release** GitHub avec `Trame.apk`. Les utilisateurs voient la mise à jour via Réglages → Vérifier maintenant.
+Quand `version.json` change sur `main`, GitHub compile l'APK signé et publie la **Release v0.3.0** avec `Trame.apk`.
+Les téléphones la détectent au prochain lancement (bandeau « Installer ») ou via Réglages → Vérifier maintenant.
 
 ## 5. Développer en local (facultatif)
 

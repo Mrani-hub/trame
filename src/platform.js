@@ -1,7 +1,8 @@
 // Couche plateforme : agendas du téléphone, notifications, fichiers, partage, mises à jour.
 // Sur navigateur (aperçu / tests), tout se replie sur un stockage local sans fonctions natives.
 import { Capacitor, registerPlugin } from '@capacitor/core';
-import { CapacitorCalendar } from '@ebarooni/capacitor-calendar';
+import { CapacitorCalendar, EventSpan } from '@ebarooni/capacitor-calendar';
+import { Contacts } from '@capacitor-community/contacts';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -85,22 +86,35 @@ export async function listDeviceEvents(from, to) {
   } catch (e) { console.warn('listEvents', e); return []; }
 }
 
-export async function createDeviceEvent(ev, calendarId, leadMin) {
+export async function createDeviceEvent(ev, calendarId, leadMin, recurrence = null) {
   const { id } = await CapacitorCalendar.createEvent({
     title: ev.title, startDate: ev.start, endDate: ev.end, isAllDay: !!ev.allDay, location: ev.location || undefined,
     description: ev.description || undefined, calendarId: calendarId || undefined, alerts: leadMin ? [-leadMin] : undefined,
+    recurrence: recurrence || undefined,
   });
   return id ? String(id) : null;
 }
 
-export async function modifyDeviceEvent(ev) {
+export async function modifyDeviceEvent(ev, recurrence = null) {
   await CapacitorCalendar.modifyEvent({
     id: ev.id, title: ev.title, startDate: ev.start, endDate: ev.end, isAllDay: !!ev.allDay, location: ev.location || '',
+    recurrence: recurrence || undefined,
   });
 }
 
-export async function deleteDeviceEvent(ev) {
-  await CapacitorCalendar.deleteEvent({ id: ev.id, instanceDate: ev.recurring ? ev.start : undefined });
+/** Ouvre l'éditeur de l'agenda du téléphone (rendez-vous répétitifs : modification de la série en sécurité). */
+export async function editDeviceEventNative(ev) {
+  await CapacitorCalendar.modifyEventWithPrompt({ id: ev.id });
+}
+
+/** scope : 'this' (cette occurrence) ou 'series' (toute la série). */
+export async function deleteDeviceEvent(ev, scope = 'this') {
+  if (ev.recurring && scope === 'series') await CapacitorCalendar.deleteEvent({ id: ev.id, span: EventSpan.THIS_AND_FUTURE_EVENTS });
+  else await CapacitorCalendar.deleteEvent({ id: ev.id, instanceDate: ev.recurring ? ev.start : undefined, span: EventSpan.THIS_EVENT });
+}
+
+export async function deleteDeviceEventsById(ids) {
+  if (ids.length) await CapacitorCalendar.deleteEventsById({ ids });
 }
 
 // ——— Notifications locales ———
@@ -266,4 +280,35 @@ export async function openWhatsApp(text, phone = '') {
     } catch { /* WhatsApp absent : on passe par le lien web */ }
   }
   return openUrl(`https://wa.me/${phone}?${q}`);
+}
+
+// ——— Contacts du téléphone ———
+const contactName = (c) => c?.name?.display || [c?.name?.given, c?.name?.family].filter(Boolean).join(' ') || '';
+const contactPhones = (c) => (c?.phones || []).filter((p) => p.number).map((p) => ({ number: p.number, type: p.type, label: p.label || '' }))
+  .sort((a, b) => (b.type === 'mobile') - (a.type === 'mobile'));
+
+export async function contactsPermission(request = false) {
+  if (!native) return false;
+  try {
+    let r = await Contacts.checkPermissions();
+    if (r.contacts !== 'granted' && r.contacts !== 'limited' && request) r = await Contacts.requestPermissions();
+    return r.contacts === 'granted' || r.contacts === 'limited';
+  } catch { return false; }
+}
+
+/** Sélecteur de contact du système : { name, phones: [{ number, type, label }] } ou null. */
+export async function pickContact() {
+  if (!(await contactsPermission(true))) throw new Error('permission denied');
+  const r = await Contacts.pickContact({ projection: { name: true, phones: true } });
+  return r?.contact ? { name: contactName(r.contact), phones: contactPhones(r.contact) } : null;
+}
+
+let contactCache = null;
+/** Tous les contacts avec numéro (mis en cache), si l'accès a déjà été accordé. */
+export async function allContacts(request = false) {
+  if (contactCache) return contactCache;
+  if (!(await contactsPermission(request))) return [];
+  const r = await Contacts.getContacts({ projection: { name: true, phones: true } });
+  contactCache = (r.contacts || []).map((c) => ({ name: contactName(c), phones: contactPhones(c) })).filter((c) => c.name && c.phones.length);
+  return contactCache;
 }

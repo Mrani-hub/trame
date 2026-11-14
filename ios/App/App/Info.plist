@@ -8,6 +8,8 @@
 	<string>Trame affiche et crée vos rendez-vous dans les agendas de votre iPhone.</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
 	<string>Trame ajoute vos rendez-vous dans l'agenda de votre choix.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Trame retrouve le numéro de vos collègues pour leur envoyer un rendez-vous par WhatsApp.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Trame utilise le micro pour dicter un rendez-vous, une tâche ou une note.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

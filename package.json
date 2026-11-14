@@ -1,6 +1,6 @@
 {
   "name": "trame",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Trame — agenda, tâches et notes pour professionnels (FR/AR, hégirien)",
   "type": "module",
@@ -12,6 +12,7 @@
     "icons": "python3 scripts/icons.py"
   },
   "dependencies": {
+    "@capacitor-community/contacts": "^8.0.0",
     "@capacitor/android": "^8.6.2",
     "@capacitor/app": "^8.1.2",
     "@capacitor/app-launcher": "^8.0.1",

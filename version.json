@@ -1,5 +1,5 @@
 {
-  "version": "0.2.0",
+  "version": "0.3.0",
   "apk": "https://github.com/Mrani-hub/trame/releases/latest/download/Trame.apk",
-  "notes": "Mode sombre, widget d'écran d'accueil, dictée vocale, envoi par WhatsApp, recherche de mise à jour automatique."
+  "notes": "Répétition des rendez-vous, tâches et rappels (comme l'agenda Android, avec le calendrier hégirien) et choix des contacts du téléphone pour WhatsApp."
 }

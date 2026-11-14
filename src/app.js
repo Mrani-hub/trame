@@ -13,6 +13,7 @@ import {
 } from './core/logic.js';
 import { makeBackup, readBackup, isEncrypted, makeShare, readShare } from './core/backup.js';
 import { noteToText, noteToPdf } from './export.js';
+import { occurrences, nextAfter, toNativeRule, ruleLabel, presets, presetIdOf, generationHorizon, normalizeRule } from './core/recurrence.js';
 
 // ——— État ———
 const DEFAULT_SETTINGS = {
@@ -21,7 +22,7 @@ const DEFAULT_SETTINGS = {
   updateUrl: 'https://raw.githubusercontent.com/Mrani-hub/trame/main/version.json', voiceLang: 'auto', lastUpdateCheck: 0,
 };
 const state = {
-  data: { format: 1, tasks: [], notes: [], localEvents: [], eventMeta: {}, contacts: {}, settings: { ...DEFAULT_SETTINGS } },
+  data: { format: 1, tasks: [], notes: [], localEvents: [], eventMeta: {}, contacts: {}, series: {}, settings: { ...DEFAULT_SETTINGS } },
   view: 'today', cursor: startOfDay(new Date()), agendaMode: 'week', monthCal: null, selDay: startOfDay(new Date()),
   taskFilter: 'open', query: '', update: null, appVersion: '', listening: false, events: [], range: null, calendars: [], calPerm: false, sheet: null,
 };
@@ -45,6 +46,8 @@ const ICONS = {
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21M8.5 21h7"/>',
   wa: '<path d="M4 20l1.2-3.6A8 8 0 1112 20a8 8 0 01-3.9-1z"/><path d="M9 9.2c.3 2.4 2.2 4.6 5 5.4l1.2-1.2-1.6-1-.8.6c-.9-.4-1.8-1.3-2.2-2.2l.6-.8-1-1.6z"/>',
   download: '<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14"/>',
+  repeat: '<path d="M17 3l3 3-3 3"/><path d="M4 11V9a3 3 0 013-3h13M7 21l-3-3 3-3"/><path d="M20 13v2a3 3 0 01-3 3H4"/>',
+  contacts: '<rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="10" r="2.6"/><path d="M8 16.5a4 4 0 018 0"/>',
   review: '<path d="M4 12a8 8 0 1014.3-4.9M18.5 3v4.5H14"/>', users: '<circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0M16 5.5a3 3 0 010 5.5M17.5 14a5 5 0 013.5 5"/>',
 };
 const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
@@ -80,11 +83,28 @@ async function ensureRange(from, to, force = false) {
   if (!force && state.range && state.range[0] <= from && state.range[1] >= to) return;
   const device = state.calPerm ? await P.listDeviceEvents(f, tt) : [];
   const hidden = new Set(S().hiddenCals);
-  const locals = state.data.localEvents.filter((e) => e.end > f && e.start < tt).map((e) => ({ ...e, source: 'local' }));
+  const locals = expandLocal(f, tt);
   state.events = [...device.filter((e) => !hidden.has(e.calendarId)), ...locals]
-    .map((e) => ({ ...e, participants: state.data.eventMeta[e.key]?.participants || [] }))
+    .map((e) => { const m = metaOf(e); return { ...e, participants: m.participants || [], rule: e.repeat || m.rule || state.data.series[m.series]?.rule || null, seriesId: m.series || null }; })
     .sort((a, b) => a.start - b.start);
   state.range = [f, tt];
+}
+/** Méta-données Trame d'un rendez-vous (participants, règle, série), par occurrence puis par série. */
+function metaOf(e) {
+  const M = state.data.eventMeta;
+  return M[e.key] || M[e.source === 'local' ? `loc:${e.id}` : `cal:${e.id}`] || {};
+}
+/** Rendez-vous locaux (agenda Trame), occurrences répétitives développées sur [from, to[. */
+function expandLocal(from, to) {
+  const out = [];
+  for (const e of state.data.localEvents) {
+    const dur = (e.end - e.start) || 3600000;
+    if (!e.repeat) { if (e.end > from && e.start < to) out.push({ ...e, source: 'local' }); continue; }
+    for (const st of occurrences(e.repeat, e.start, from - dur, to, { hijriOffset: S().hijriOffset, exdates: e.exdates || [] })) {
+      out.push({ ...e, source: 'local', key: `loc:${e.id}@${st}`, start: st, end: st + dur, recurring: true, seriesStart: e.start });
+    }
+  }
+  return out;
 }
 const eventsOn = (day) => {
   const a = startOfDay(day).getTime(), b = a + DAY;
@@ -178,7 +198,7 @@ function eventRow(e, conf = new Set()) {
   const n = ctx.related.length + ctx.openTasks.length;
   return `<button class="row ev" data-act="event" data-key="${esc(e.key)}" style="--c:${esc(e.color || '#1F4E79')}">
     <div class="when">${e.allDay ? t('allDayShort') : `${D(fmtTime(e.start))}<small>${D(fmtTime(e.end))}</small>`}</div>
-    <div class="what"><b>${esc(e.title || t('untitled'))}</b>${e.location ? `<small>${esc(e.location)}</small>` : ''}</div>
+    <div class="what"><b>${esc(e.title || t('untitled'))}${e.recurring || e.rule || e.seriesId ? ` <span class="rep">${icon('repeat')}</span>` : ''}</b>${e.location ? `<small>${esc(e.location)}</small>` : ''}</div>
     ${conf.has(e.key) ? `<span class="badge warn">${icon('warn')}</span>` : ''}${n ? `<span class="badge">${icon('link')}${D(n)}</span>` : ''}
   </button>`;
 }
@@ -198,7 +218,7 @@ function taskRow(x) {
   ].filter(Boolean).join(' · ');
   return `<div class="row task ${x.done ? 'done' : ''} ${x.priority === 'high' ? 'high' : ''}">
     <button class="tick" data-act="toggle" data-id="${x.id}" aria-label="${t('done')}">${x.done ? icon('check') : ''}</button>
-    <button class="what" data-act="task" data-id="${x.id}"><b>${esc(x.title)}</b>${meta ? `<small>${meta}</small>` : ''}</button>
+    <button class="what" data-act="task" data-id="${x.id}"><b>${esc(x.title)}${x.repeat ? ` <span class="rep">${icon('repeat')}</span>` : ''}</b>${meta ? `<small>${meta}</small>` : ''}</button>
   </div>`;
 }
 
@@ -337,7 +357,7 @@ function closeSheet() {
 function renderSheet() {
   const s = state.sheet, el = $('#sheet');
   if (!s) { el.innerHTML = ''; el.className = ''; return; }
-  const renderers = { wa: sheetWhatsApp, edit: sheetEdit, event: sheetEvent, note: sheetNote, settings: sheetSettings, review: sheetReview, welcome: sheetWelcome };
+  const renderers = { delrep: sheetDelRep, wa: sheetWhatsApp, edit: sheetEdit, event: sheetEvent, note: sheetNote, settings: sheetSettings, review: sheetReview, welcome: sheetWelcome };
   el.className = 'open' + (s.kind === 'note' ? ' full' : '');
   el.innerHTML = `<div class="scrim" data-act="close"></div><div class="panel" role="dialog">${renderers[s.kind]()}</div>`;
   if (s.kind === 'edit') updateEditDerived();
@@ -400,6 +420,7 @@ function sheetEdit() {
       </div>
       <div class="two"><label>${t('remindAt')}<input type="date" name="remindDate" value="${d.remindAt ? ymd(d.remindAt) : ''}"></label>
       <label>&nbsp;<input type="time" name="remindTime" value="${d.remindAt ? hm(d.remindAt) : ''}"></label></div>` : ''}
+    ${d.type !== 'note' ? repeatBlock(d) : ''}
     ${d.warnings?.includes('defaultTime') ? `<p class="warnline">${icon('warn')} ${t('defaultTimeWarn')}</p>` : ''}
     <div class="actions">
       ${d.existing ? `<button type="button" class="btn danger ghost" data-act="edel">${t('del')}</button>` : ''}
@@ -408,6 +429,28 @@ function sheetEdit() {
       <button class="btn primary">${t('save')}</button>
     </div>
   </form>`;
+}
+const refStart = (d) => (d.date ? combine(d.date, d.time || '09:00') : startOfDay(new Date()).getTime() + 9 * 3600000);
+function repeatBlock(d) {
+  const ref = refStart(d), L = S().lang;
+  const pid = d.repPreset || presetIdOf(d.repeat, ref);
+  const r = normalizeRule(d.repeat || { freq: 'weekly' }, ref);
+  const opt = (v, cur, label) => `<option value="${v}" ${String(cur) === String(v) ? 'selected' : ''}>${esc(label)}</option>`;
+  const dows = t('dowShort');
+  const wk = Math.ceil(new Date(ref).getDate() / 7);
+  const endMode = r.count ? 'count' : r.until ? 'until' : 'never';
+  return `<div class="repeat-box">
+    <label>${t('repeat')}<select name="repeatPreset">${presets(ref, L, S().hijriOffset).map((p) => opt(p.id, pid, D(p.label))).join('')}${opt('custom', pid, t('repCustom'))}</select></label>
+    ${pid === 'custom' ? `<div class="custom-rep">
+      <div class="two"><label>${t('repEvery')}<input type="number" name="repInterval" min="1" max="99" value="${r.interval}" inputmode="numeric"></label>
+      <label>&nbsp;<select name="repFreq">${['daily', 'weekly', 'monthly', 'yearly', 'hmonthly', 'hyearly'].map((f) => opt(f, r.freq, t('freq_' + f))).join('')}</select></label></div>
+      ${r.freq === 'weekly' ? `<div class="dows">${[1, 2, 3, 4, 5, 6, 7].map((n) => `<label class="dow"><input type="checkbox" name="repDay" value="${n}" ${r.byDay.includes(n) ? 'checked' : ''}><span>${dows[n - 1]}</span></label>`).join('')}</div>` : ''}
+      ${r.freq === 'monthly' ? `<select name="repMonthMode">${opt('day', r.monthMode, D(ruleLabel({ freq: 'monthly' }, ref, L)))}${wk <= 4 ? opt('nth', r.monthMode, ruleLabel({ freq: 'monthly', monthMode: 'nth' }, ref, L)) : ''}${opt('last', r.monthMode, ruleLabel({ freq: 'monthly', monthMode: 'last' }, ref, L))}</select>` : ''}
+      <div class="two"><label>${t('repEnds')}<select name="repEnd">${opt('never', endMode, t('repNever'))}${opt('until', endMode, t('repUntil'))}${opt('count', endMode, t('repCount'))}</select></label>
+      <label>&nbsp;${endMode === 'until' ? `<input type="date" name="repUntil" value="${r.until ? ymd(r.until) : ymd(addDays(new Date(ref), 90))}">` : endMode === 'count' ? `<input type="number" name="repCount" min="1" max="999" value="${r.count || 10}" inputmode="numeric">` : ''}</label></div>
+    </div>` : ''}
+    ${d.repeat ? `<p class="replabel" id="repLbl">${esc(D(ruleLabel(d.repeat, ref, L, S().hijriOffset)))}</p>` : ''}
+  </div>`;
 }
 function readEditForm() {
   const f = $('#editForm'); if (!f) return;
@@ -418,6 +461,22 @@ function readEditForm() {
   if (f.elements.allDay) d.allDay = f.elements.allDay.checked;
   if (f.elements.participants) d.participants = v('participants').split(/[,،]/).map((s) => s.trim()).filter(Boolean);
   if (f.elements.remindDate) d.remindAt = v('remindDate') ? combine(v('remindDate'), v('remindTime') || '09:00') : null;
+  if (f.elements.repeatPreset) {
+    const ref = refStart(d), pid = v('repeatPreset');
+    d.repPreset = pid;
+    if (pid !== 'custom') d.repeat = presets(ref).find((p) => p.id === pid)?.rule || null;
+    else if (!f.elements.repFreq) d.repeat = d.repeat || { freq: 'weekly' };
+    else {
+      const freq = v('repFreq'), end = f.elements.repEnd.value;
+      d.repeat = {
+        freq, interval: Math.max(1, +v('repInterval') || 1),
+        byDay: freq === 'weekly' ? $$('[name=repDay]:checked', f).map((i) => +i.value) : undefined,
+        monthMode: freq === 'monthly' ? (v('repMonthMode') || 'day') : 'day',
+        until: end === 'until' && v('repUntil') ? parseYmd(v('repUntil')).getTime() : null,
+        count: end === 'count' ? Math.max(1, +v('repCount') || 10) : null,
+      };
+    }
+  }
   return d;
 }
 const combine = (date, time) => { const x = parseYmd(date); const [h, m] = (time || '00:00').split(':').map(Number); x.setHours(h, m, 0, 0); return x.getTime(); };
@@ -428,6 +487,7 @@ async function updateEditDerived() {
   const lbl = $('#hijriLbl');
   if (lbl) lbl.textContent = d.date ? D(dateLabel(parseYmd(d.date), { ...S(), calMode: S().calMode === 'greg' ? 'both' : S().calMode }, { year: true })) : t('noDue');
   const times = $('.times', f); if (times) times.classList.toggle('hidden', !!d.allDay);
+  const rl = $('#repLbl'); if (rl && d.repeat) rl.textContent = D(ruleLabel(d.repeat, refStart(d), S().lang, S().hijriOffset));
   const box = $('#conflictBox');
   if (box && d.type === 'event' && d.date && d.time && !d.allDay) {
     const start = combine(d.date, d.time);
@@ -450,21 +510,37 @@ async function saveEdit() {
     let end = d.allDay ? addDays(parseYmd(d.date), 1).getTime() : d.endTime ? combine(d.date, d.endTime) : start + s.defaultDur * MIN;
     if (end <= start) end = start + s.defaultDur * MIN;
     const ev = { title: d.title, start, end, allDay: d.allDay, location: d.location };
-    let key;
+    const rule = d.repeat ? normalizeRule(d.repeat, start) : null;
+    let key, metaKeys = [];
     try {
       if (d.existing?.source === 'device') {
-        await P.modifyDeviceEvent({ ...ev, id: d.existing.id }); key = d.existing.key;
+        const native = toNativeRule(rule, start);
+        await P.modifyDeviceEvent({ ...ev, id: d.existing.id }, native);
+        key = `cal:${d.existing.id}`;
+        if (rule && !native) metaKeys = await createGeneratedSeries(ev, rule, d.existing.calendarId, [d.existing.id]);
+        else if (rule) state.data.eventMeta[key] = { ...(state.data.eventMeta[key] || {}), rule };
       } else if (d.existing?.source === 'local') {
-        Object.assign(state.data.localEvents.find((e) => e.id === d.existing.id), ev); key = d.existing.key;
+        const base = state.data.localEvents.find((e) => e.id === d.existing.id);
+        // une occurrence modifiée décale toute la série du même écart
+        const delta = start - d.existing.start;
+        Object.assign(base, { title: ev.title, location: ev.location, allDay: ev.allDay, start: base.start + delta, end: base.start + delta + (end - start), repeat: rule });
+        key = `loc:${base.id}`;
       } else if (d.calendarId && d.calendarId !== 'local' && state.calPerm) {
-        const id = await P.createDeviceEvent(ev, d.calendarId, s.contextLead); key = `cal:${id}`;
+        const native = toNativeRule(rule, start);
+        if (rule && !native) { metaKeys = await createGeneratedSeries(ev, rule, d.calendarId, []); key = metaKeys[0]; }
+        else {
+          const id = await P.createDeviceEvent(ev, d.calendarId, s.contextLead, native); key = `cal:${id}`;
+          if (rule) state.data.eventMeta[key] = { rule };
+        }
         if (s.writeCal !== d.calendarId) s.writeCal = d.calendarId;
       } else {
         const id = uid('ev'); key = `loc:${id}`;
-        state.data.localEvents.push({ id, key, ...ev, created: now });
+        state.data.localEvents.push({ id, key, ...ev, repeat: rule, created: now });
       }
     } catch (e) { console.error(e); toast(String(e.message || e)); return; }
-    if (d.participants?.length) state.data.eventMeta[key] = { participants: d.participants };
+    for (const k of metaKeys.length ? metaKeys : [key]) {
+      if (d.participants?.length) state.data.eventMeta[k] = { ...(state.data.eventMeta[k] || {}), participants: d.participants };
+    }
     invalidate();
   } else if (d.type === 'note') {
     const n = { id: uid('n'), title: d.title || firstLine(d.body), body: d.body, created: now, updated: now, meeting: null };
@@ -477,19 +553,89 @@ async function saveEdit() {
       due: !isRem && d.date ? parseYmd(d.date).getTime() : null,
       remindAt: isRem ? combine(d.date, d.time || '09:00') : d.remindAt || null,
       durationMin: isRem ? null : d.durationMin || 30, priority: d.priority || 'normal', assignee: d.assignee || '',
+      repeat: d.repeat ? normalizeRule(d.repeat, isRem ? combine(d.date, d.time || '09:00') : (d.date ? parseYmd(d.date).getTime() : Date.now())) : null,
     });
+    if (x.repeat && !(x.due || x.remindAt)) x.due = startOfDay(new Date()).getTime();
+    x.repeatStart = x.repeat ? (x.due || x.remindAt) : null;
     if (!d.existing) state.data.tasks.push(x);
   }
   persist(); closeSheet(); toast(t('saved')); render();
 }
 const firstLine = (s) => (s || '').split('\n')[0].slice(0, 60);
 
+/** Règle non exprimable dans l'agenda du téléphone (hégirien, 2e jeudi…) : occurrences créées une à une, regroupées en série. */
+async function createGeneratedSeries(ev, rule, calendarId, existingIds) {
+  const dur = ev.end - ev.start;
+  const starts = generationHorizon(rule, ev.start, S().hijriOffset);
+  const ids = [...existingIds];
+  for (const st of starts) {
+    if (existingIds.length && st === ev.start) continue;
+    const id = await P.createDeviceEvent({ ...ev, start: st, end: st + dur }, calendarId, S().contextLead, null);
+    if (id) ids.push(id);
+  }
+  const sid = uid('s');
+  state.data.series[sid] = { rule, ids, title: ev.title, start: ev.start, calendarId };
+  const keys = ids.map((id) => `cal:${id}`);
+  for (const k of keys) state.data.eventMeta[k] = { ...(state.data.eventMeta[k] || {}), series: sid };
+  toast(t('seriesCreated', ids.length));
+  return keys;
+}
+
+/** Terminer une tâche répétitive crée la suivante (comme Google Tasks). */
+function completeTask(x) {
+  x.done = true; x.doneAt = Date.now();
+  if (!x.repeat || x.nextId) return null;
+  const base = x.remindAt || x.due;
+  if (!base) return null;
+  const series = x.repeatStart || base;
+  const next = nextAfter(x.repeat, series, base, { hijriOffset: S().hijriOffset });
+  if (!next) return null;
+  const n = { ...x, id: uid('t'), done: false, doneAt: null, created: Date.now(), plannedStart: null, nextId: null, repeatStart: series,
+    due: x.due ? startOfDay(next).getTime() : null, remindAt: x.remindAt ? next : null };
+  x.nextId = n.id;
+  state.data.tasks.push(n);
+  toast(t('nextOccurrence', D(fmtDate(next, { weekday: true }))));
+  return n;
+}
+
 async function deleteFromEdit() {
   const d = state.sheet.draft;
+  const ev = d.existing.kind === 'event' ? state.events.find((e) => e.key === d.existing.key) : null;
+  if (ev && (ev.recurring || ev.seriesId)) { openSheet({ kind: 'delrep', ev, back: state.sheet }); return; }
   if (!confirm(t('confirmDelete'))) return;
   if (d.existing.kind === 'task') state.data.tasks = state.data.tasks.filter((x) => x.id !== d.existing.id);
   else if (d.existing.source === 'device') { try { await P.deleteDeviceEvent(d.existing); } catch (e) { toast(String(e.message || e)); return; } }
   else state.data.localEvents = state.data.localEvents.filter((e) => e.id !== d.existing.id);
+  invalidate(); persist(); closeSheet(); toast(t('deleted')); render();
+}
+
+function sheetDelRep() {
+  const e = state.sheet.ev;
+  return `<div class="sheet-head"><b>${t('delRepTitle')}</b><button class="iconbtn" data-act="close">✕</button></div>
+    <p class="meta">${esc(e.title)} · ${D(fmtDate(e.start, { weekday: true }))}</p>
+    <div class="actions col">
+      <button class="btn" data-act="delrep" data-scope="this">${t('delThis')}</button>
+      <button class="btn danger" data-act="delrep" data-scope="series">${t('delSeries')}</button>
+      <button class="btn ghost" data-act="close">${t('cancel')}</button>
+    </div>`;
+}
+async function deleteRecurring(e, scope) {
+  try {
+    if (e.source === 'local') {
+      const base = state.data.localEvents.find((x) => x.id === e.id);
+      if (scope === 'series' || !base) state.data.localEvents = state.data.localEvents.filter((x) => x.id !== e.id);
+      else base.exdates = [...(base.exdates || []), e.start];
+    } else if (e.seriesId && state.data.series[e.seriesId]) {
+      const ser = state.data.series[e.seriesId];
+      if (scope === 'series') {
+        await P.deleteDeviceEventsById(ser.ids);
+        delete state.data.series[e.seriesId];
+      } else {
+        await P.deleteDeviceEventsById([e.id]);
+        ser.ids = ser.ids.filter((i) => i !== e.id);
+      }
+    } else await P.deleteDeviceEvent(e, scope);
+  } catch (err) { toast(String(err.message || err)); return; }
   invalidate(); persist(); closeSheet(); toast(t('deleted')); render();
 }
 
@@ -498,13 +644,14 @@ function openTaskEditor(id) {
   openSheet({ kind: 'edit', draft: {
     type: x.isReminder ? 'reminder' : 'task', title: x.title, date: x.isReminder ? (x.remindAt ? ymd(x.remindAt) : '') : x.due ? ymd(x.due) : '',
     time: x.isReminder && x.remindAt ? hm(x.remindAt) : '', durationMin: x.durationMin || 30, priority: x.priority, assignee: x.assignee,
-    remindAt: x.isReminder ? null : x.remindAt, existing: { kind: 'task', id: x.id },
+    remindAt: x.isReminder ? null : x.remindAt, repeat: x.repeat || null, existing: { kind: 'task', id: x.id },
   } });
 }
 function openEventEditor(e) {
   openSheet({ kind: 'edit', draft: {
     type: 'event', title: e.title, date: ymd(e.start), time: e.allDay ? '' : hm(e.start), endTime: e.allDay ? '' : hm(e.end), allDay: e.allDay,
     location: e.location || '', participants: e.participants || [], calendarId: e.source === 'local' ? 'local' : e.calendarId,
+    repeat: e.source === 'local' ? (state.data.localEvents.find((x) => x.id === e.id)?.repeat || null) : e.rule || null,
     existing: { kind: 'event', source: e.source, id: e.id, key: e.key, recurring: e.recurring, start: e.start },
   } });
 }
@@ -520,6 +667,7 @@ function sheetEvent() {
   return `<div class="sheet-head"><b>${esc(e.title || t('untitled'))}</b><button class="iconbtn" data-act="close" aria-label="${t('close')}">✕</button></div>
     <p class="meta">${D(esc(fmtDate(e.start, { year: true })))}<br>${e.allDay ? t('allDay') : `${D(fmtTime(e.start))} – ${D(fmtTime(e.end))}`}
       ${e.location ? `<br>${esc(e.location)}` : ''}<br><small>${esc(e.source === 'local' ? t('localCal') : cal?.title || '')}</small></p>
+    ${e.rule || e.recurring ? `<p class="replabel">${icon('repeat')} ${esc(e.rule ? D(ruleLabel(e.rule, e.seriesStart || state.data.series[e.seriesId]?.start || e.start, S().lang, S().hijriOffset)) : t('repeating'))}</p>` : ''}
     ${people.length ? `<p class="meta">${icon('users')} ${esc(people.join(', '))}</p>` : ''}
     ${conf.length ? `<div class="conflict">${icon('warn')}<div><b>${t('conflictWarn')}</b>${conf.map((c) => `<small>${D(fmtTime(c.start))}–${D(fmtTime(c.end))} · ${esc(c.title)}</small>`).join('')}</div></div>` : ''}
     <h3 class="ctx-title">${icon('link')} ${t('context')}</h3>
@@ -751,15 +899,47 @@ function taskMessage(x) {
 const whoOf = (e) => [...new Set([...(e.attendees || []).map((a) => a.name).filter(Boolean), ...(e.participants || [])])];
 function openWhatsApp(text, people = []) {
   const known = people.map((p) => ({ name: p, phone: state.data.contacts[norm(p)] || '' }));
-  openSheet({ kind: 'wa', text, people: known, ev: state.sheet?.kind === 'event' ? state.sheet.ev : null, back: state.sheet, phone: known.length === 1 ? known[0].phone : '', name: known.length === 1 ? known[0].name : '' });
+  openSheet({ kind: 'wa', text, people: known, ev: state.sheet?.kind === 'event' ? state.sheet.ev : null, back: state.sheet, phone: known.length === 1 ? known[0].phone : '', name: known.length === 1 ? known[0].name : '', phones: [], sug: [] });
+  // Si l'accès aux contacts est déjà accordé : numéros retrouvés automatiquement à partir des noms
+  P.allContacts(false).then((list) => {
+    state.contactsList = list;
+    const w = state.sheet; if (w?.kind !== 'wa' || !list.length) return;
+    let changed = false;
+    for (const p of w.people) {
+      if (p.phone) continue;
+      const m = matchContacts(p.name);
+      if (m.length === 1) { p.phone = waNumber(m[0].phones[0].number); changed = true; }
+    }
+    const cur = w.people.find((p) => p.name === w.name);
+    if (cur && !w.phone && cur.phone) { w.phone = cur.phone; changed = true; }
+    if (changed) { syncWaFromDom(); renderSheet(); }
+  });
+}
+function matchContacts(name, max = 6) {
+  const q = norm(name || '');
+  if (q.length < 2) return [];
+  return (state.contactsList || []).filter((c) => { const n = norm(c.name); return n.includes(q) || q.split(' ').every((w) => n.includes(w)); }).slice(0, max);
+}
+function syncWaFromDom() {
+  const f = $('#waForm'), w = state.sheet; if (!f || w?.kind !== 'wa') return;
+  w.name = f.querySelector('[name=name]').value; w.phone = f.querySelector('[name=phone]').value; w.text = f.querySelector('[name=text]').value;
+}
+const phoneType = (p) => (p.type === 'mobile' ? t('phoneMobile') : p.type === 'work' ? t('phoneWork') : p.type === 'home' ? t('phoneHome') : p.label || '');
+function useContact(c) {
+  const w = state.sheet;
+  w.name = c.name; w.phones = c.phones; w.phone = c.phones[0] ? waNumber(c.phones[0].number) : ''; w.sug = [];
+  renderSheet();
 }
 function sheetWhatsApp() {
   const w = state.sheet;
   return `<div class="sheet-head"><button class="iconbtn" data-act="waback" aria-label="${t('close')}">${icon(S().lang === 'ar' ? 'right' : 'left')}</button><b>${icon('wa')} WhatsApp</b><button class="iconbtn" data-act="close">✕</button></div>
   <div class="form" id="waForm">
     ${w.people.length > 1 ? `<div class="seg">${w.people.map((p, i) => `<button type="button" data-act="wapick" data-i="${i}" class="${w.name === p.name ? 'on' : ''}">${esc(p.name)}</button>`).join('')}</div>` : ''}
-    <div class="two"><label>${t('waName')}<input name="name" value="${esc(w.name)}"></label>
+    ${P.native ? `<button type="button" class="btn ghost" data-act="wacontact">${icon('contacts')} ${t('pickContact')}</button>` : ''}
+    <div class="two"><label>${t('waName')}<input name="name" value="${esc(w.name)}" autocomplete="off"></label>
     <label>${t('waPhone')}<input name="phone" type="tel" inputmode="tel" dir="ltr" value="${esc(w.phone)}" placeholder="06 12 34 56 78"></label></div>
+    <div id="waSug" class="sug">${(w.sug || []).map((c, i) => `<button type="button" class="chip" data-act="wasug" data-i="${i}">${icon('contacts')} ${esc(c.name)}</button>`).join('')}</div>
+    ${w.phones?.length > 1 ? `<div class="seg">${w.phones.map((p, i) => `<button type="button" data-act="waphone" data-i="${i}" class="${waNumber(p.number) === waNumber(w.phone) ? 'on' : ''}" dir="ltr">${esc(p.number)}${phoneType(p) ? ` · ${esc(phoneType(p))}` : ''}</button>`).join('')}</div>` : ''}
     <p class="hint">${t('waHint')}</p>
     <label>${t('waMessage')}<textarea name="text" rows="9">${esc(w.text)}</textarea></label>
     <div class="actions wrap">
@@ -783,7 +963,7 @@ function pushWidget() {
   P.updateWidget({
     v: 1, lang: s.lang, calMode: s.calMode, hijriOffset: s.hijriOffset, digits: s.digits, hiddenCals: s.hiddenCals,
     calPerm: state.calPerm,
-    localEvents: state.data.localEvents.filter((e) => e.end > from).map((e) => ({ id: e.id, title: e.title, start: e.start, end: e.end, allDay: !!e.allDay, location: e.location || '' })),
+    localEvents: expandLocal(from, from + 130 * DAY).map((e) => ({ id: e.id, title: e.title, start: e.start, end: e.end, allDay: !!e.allDay, location: e.location || '' })),
     tasks: state.data.tasks.filter((x) => !x.done && (x.due || x.remindAt || x.plannedStart)).map((x) => ({
       id: x.id, title: x.title, high: x.priority === 'high', reminder: !!x.isReminder,
       due: x.due || null, remindAt: x.remindAt || null, plannedStart: x.plannedStart || null, durationMin: x.durationMin || null,
@@ -820,10 +1000,10 @@ async function rescheduleNotifs() {
   if (s.contextLead > 0) {
     const from = Date.now(), to = from + 7 * DAY;
     const device = state.calPerm ? await P.listDeviceEvents(from, to) : [];
-    const evs = [...device.filter((e) => !s.hiddenCals.includes(e.calendarId)), ...state.data.localEvents.filter((e) => e.start > from && e.start < to)];
+    const evs = [...device.filter((e) => !s.hiddenCals.includes(e.calendarId)), ...expandLocal(from, to).filter((e) => e.start > from)];
     for (const e of evs) {
       if (e.allDay) continue;
-      const ctx = buildContext({ ...e, participants: state.data.eventMeta[e.key]?.participants || [] }, state.data);
+      const ctx = buildContext({ ...e, participants: metaOf(e).participants || [] }, state.data);
       items.push({
         ref: 'e:' + e.key, at: e.start - s.contextLead * MIN, title: `${t('notifEvent', s.contextLead)} · ${e.title}`,
         body: t('notifCtx', ctx.related.length, ctx.openTasks.length), extra: { kind: 'event', key: e.key, start: e.start },
@@ -848,14 +1028,18 @@ const actions = {
   rv: (b) => {
     const x = state.data.tasks.find((k) => k.id === b.dataset.id); if (!x) return;
     const op = b.dataset.op, tomorrow = addDays(startOfDay(new Date()), 1).getTime();
-    if (op === 'done') Object.assign(x, { done: true, doneAt: Date.now() });
+    if (op === 'done') completeTask(x);
     if (op === 'tomorrow') { x.due = tomorrow; x.plannedStart = null; if (x.remindAt) x.remindAt = tomorrow + 9 * 3600000; }
     if (op === 'nodate') Object.assign(x, { due: null, plannedStart: null, remindAt: null });
     if (op === 'del') state.data.tasks = state.data.tasks.filter((k) => k !== x);
     persist(); renderSheet(); render();
   },
   plan: (b) => { const x = state.data.tasks.find((k) => k.id === b.dataset.id); if (x) { x.plannedStart = +b.dataset.at; persist(); render(); } },
-  toggle: (b) => { const x = state.data.tasks.find((k) => k.id === b.dataset.id); if (x) { x.done = !x.done; x.doneAt = x.done ? Date.now() : null; persist(); if (state.sheet) renderSheet(); render(); } },
+  toggle: (b) => {
+    const x = state.data.tasks.find((k) => k.id === b.dataset.id); if (!x) return;
+    if (x.done) { x.done = false; x.doneAt = null; } else completeTask(x);
+    persist(); if (state.sheet) renderSheet(); render();
+  },
   task: (b) => openTaskEditor(b.dataset.id),
   event: (b) => { const e = state.events.find((x) => x.key === b.dataset.key); if (e) openSheet({ kind: 'event', ev: e }); },
   note: (b) => { const n = state.data.notes.find((x) => x.id === b.dataset.id); if (n) openSheet({ kind: 'note', note: JSON.parse(JSON.stringify(n)) }); },
@@ -887,7 +1071,15 @@ const actions = {
   edel: () => deleteFromEdit(),
   evnote: () => { const ev = state.sheet.ev; newNote(true, ev); },
   evics: () => { const e = state.sheet.ev; P.shareFile(`${(e.title || 'rdv').slice(0, 40)}.ics`, buildICS(e, { lang: S().lang, hijriOffset: S().hijriOffset }), 'text/calendar', t('shareIcs')); },
-  evedit: () => openEventEditor(state.sheet.ev),
+  evedit: async () => {
+    const e = state.sheet.ev;
+    if (e.source === 'device' && e.recurring && P.native) {
+      try { await P.editDeviceEventNative(e); } catch (err) { toast(String(err.message || err)); }
+      invalidate(); closeSheet(); render(); return;
+    }
+    openEventEditor(e);
+  },
+  delrep: (b) => deleteRecurring(state.sheet.ev, b.dataset.scope),
   decadd: () => { syncNoteFromDom(); state.sheet.note.meeting.decisions.push(''); renderSheet(); $$('[data-dec]').pop()?.focus(); },
   decdel: (b) => { syncNoteFromDom(); state.sheet.note.meeting.decisions.splice(+b.dataset.i, 1); renderSheet(); },
   actadd: () => { syncNoteFromDom(); state.sheet.note.meeting.actions.push({ id: uid('a'), text: '', who: '', due: null }); renderSheet(); $$('[data-act-text]').pop()?.focus(); },
@@ -960,7 +1152,19 @@ const actions = {
   evwa: () => openWhatsApp(eventMessage(state.sheet.ev), whoOf(state.sheet.ev)),
   taskwa: () => { const x = state.data.tasks.find((k) => k.id === state.sheet.draft.existing.id); if (x) openWhatsApp(taskMessage(x), x.assignee ? [x.assignee] : []); },
   wasend: () => sendWhatsApp(),
-  wapick: (b) => { const w = state.sheet; const f = $('#waForm'); w.text = f.querySelector('[name=text]').value; const p = w.people[+b.dataset.i]; w.name = p.name; w.phone = p.phone; renderSheet(); },
+  wapick: (b) => {
+    syncWaFromDom(); const w = state.sheet; const p = w.people[+b.dataset.i];
+    w.name = p.name; w.phone = p.phone; w.phones = [];
+    const m = p.phone ? [] : matchContacts(p.name);
+    if (m.length === 1) useContact(m[0]); else { w.sug = m; renderSheet(); }
+  },
+  wacontact: async () => {
+    syncWaFromDom();
+    try { const c = await P.pickContact(); if (c) { if (!c.phones.length) toast(t('noPhone')); useContact(c); } }
+    catch (e) { if (/denied|permission/i.test(String(e?.message || e))) toast(t('contactsDenied')); }
+  },
+  wasug: (b) => { syncWaFromDom(); useContact(state.sheet.sug[+b.dataset.i]); },
+  waphone: (b) => { syncWaFromDom(); const w = state.sheet; w.phone = waNumber(w.phones[+b.dataset.i].number); renderSheet(); },
   waics: () => { const w = state.sheet; if (w.ev) P.shareFile(`${(w.ev.title || 'rdv').slice(0, 40)}.ics`, buildICS(w.ev, { lang: S().lang, hijriOffset: S().hijriOffset }), 'text/calendar', t('shareIcs')); },
   waback: () => { const w = state.sheet; state.sheet = w.back; renderSheet(); },
   wlang: (b) => { S().lang = b.dataset.l; setLang(S().lang); persist(); render(); renderSheet(); },
@@ -972,7 +1176,7 @@ const actions = {
 };
 
 function normalizeData(d) {
-  const out = { format: 1, tasks: [], notes: [], localEvents: [], eventMeta: {}, contacts: {}, ...(d || {}) };
+  const out = { format: 1, tasks: [], notes: [], localEvents: [], eventMeta: {}, contacts: {}, series: {}, ...(d || {}) };
   out.settings = { ...DEFAULT_SETTINGS, ...(d?.settings || {}) };
   return out;
 }
@@ -997,9 +1201,18 @@ function bind() {
   });
   document.addEventListener('input', (ev) => {
     if (ev.target.id === 'q') { state.query = ev.target.value; clearTimeout(bind.qt); bind.qt = setTimeout(render, 180); }
+    if (ev.target.name === 'name' && ev.target.closest('#waForm')) {
+      const w = state.sheet; w.sug = matchContacts(ev.target.value);
+      const box = $('#waSug');
+      if (box) box.innerHTML = w.sug.map((c, i) => `<button type="button" class="chip" data-act="wasug" data-i="${i}">${icon('contacts')} ${esc(c.name)}</button>`).join('');
+    }
   });
   document.addEventListener('change', (ev) => {
     const el = ev.target;
+    if (el.closest('#editForm') && ['repeatPreset', 'repFreq', 'repEnd', 'date'].includes(el.name)) {
+      readEditForm();
+      if (el.name !== 'date' || state.sheet.draft.repPreset !== 'custom') { renderSheet(); return; }
+    }
     if (el.closest('#editForm')) {
       if (el.dataset.h) { // sélecteur hégirien → date grégorienne
         const f = $('#editForm'); const g = (k) => +f.querySelector(`[data-h="${k}"]`).value;

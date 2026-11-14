@@ -22,6 +22,8 @@ jobs:
       SIGNING_KEY: ${{ secrets.TRAME_SIGNING_KEY }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -42,6 +44,7 @@ jobs:
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
       - name: Version
         run: |
+          node -p "require('./version.json').notes" > release-notes.txt
           echo "TRAME_VERSION_NAME=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
           echo "TRAME_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
       # Clé permanente : fichier chiffré dans android/signing/, déchiffré avec le secret TRAME_SIGNING_KEY.
@@ -90,12 +93,26 @@ jobs:
         with:
           name: Trame-${{ env.TRAME_VERSION_NAME }}-playstore
           path: android/app/build/outputs/bundle/release/app-release.aab
+      # Publication : quand version.json change sur main (ou message de commit contenant [release]),
+      # une Release vX.Y.Z est créée avec Trame.apk signé — c'est le lien lu par la mise à jour intégrée.
+      - name: Faut-il publier ?
+        id: rel
+        run: |
+          if [ -n "$TRAME_KEYSTORE_PATH" ] && [ "${{ github.ref }}" = "refs/heads/main" ] && \
+             { git diff --name-only HEAD~1 HEAD | grep -qx version.json || git log -1 --pretty=%B | grep -q '\[release\]'; }; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Publier la Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.rel.outputs.publish == 'true' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.TRAME_VERSION_NAME }}
+          name: Trame ${{ env.TRAME_VERSION_NAME }}
+          target_commitish: ${{ github.sha }}
+          body_path: release-notes.txt
           files: Trame.apk
-          generate_release_notes: true
+          make_latest: true
+          overwrite_files: true
 
   ios:
     name: iOS (vérification)

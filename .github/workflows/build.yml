@@ -20,8 +20,8 @@ jobs:
     env:
       KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -31,11 +31,14 @@ jobs:
           npm test
           npm run build:web
           npx cap sync android
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 21
       - uses: android-actions/setup-android@v3
+        with:
+          # le paquet « tools » (installé par défaut) n'existe plus : on liste les paquets utiles
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
       - name: Version
         run: |
           echo "TRAME_VERSION_NAME=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
@@ -83,8 +86,8 @@ jobs:
     name: iOS (vérification)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm

@@ -1,0 +1,9 @@
+{
+  "appId": "ma.trame.app",
+  "appName": "Trame",
+  "webDir": "www",
+  "android": { "allowMixedContent": false },
+  "plugins": {
+    "LocalNotifications": { "smallIcon": "ic_stat_trame", "iconColor": "#1F4E79" }
+  }
+}

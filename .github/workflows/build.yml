@@ -1,0 +1,100 @@
+# Compile Trame dans le cloud GitHub — aucun SDK à installer sur votre PC.
+# Android : APK de test à chaque envoi ; APK signé si les secrets ANDROID_* sont renseignés.
+# Étiquette vX.Y.Z : publication d'une « Release » avec Trame.apk (lien utilisé par la mise à jour intégrée).
+# iOS : vérification que le projet compile (l'envoi TestFlight viendra avec le compte Apple Developer).
+name: Compiler Trame
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    env:
+      KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Dépendances, tests et appli web
+        run: |
+          npm ci
+          npm test
+          npm run build:web
+          npx cap sync android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - name: Version
+        run: |
+          echo "TRAME_VERSION_NAME=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+          echo "TRAME_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
+      - name: Clé de signature
+        if: env.KS_B64 != ''
+        run: |
+          echo "$KS_B64" | base64 --decode > "$RUNNER_TEMP/trame-release.jks"
+          echo "TRAME_KEYSTORE_PATH=$RUNNER_TEMP/trame-release.jks" >> "$GITHUB_ENV"
+      - name: Compiler
+        working-directory: android
+        env:
+          TRAME_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          TRAME_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          TRAME_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          if [ -n "$TRAME_KEYSTORE_PATH" ]; then
+            ./gradlew --no-daemon assembleRelease bundleRelease
+            cp app/build/outputs/apk/release/app-release.apk ../Trame.apk
+          else
+            ./gradlew --no-daemon assembleDebug
+            cp app/build/outputs/apk/debug/app-debug.apk ../Trame.apk
+          fi
+      - name: APK à télécharger
+        uses: actions/upload-artifact@v4
+        with:
+          name: Trame-${{ env.TRAME_VERSION_NAME }}-${{ github.run_number }}
+          path: Trame.apk
+          if-no-files-found: error
+      - name: Bundle Play Store (.aab)
+        if: env.TRAME_KEYSTORE_PATH != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: Trame-${{ env.TRAME_VERSION_NAME }}-playstore
+          path: android/app/build/outputs/bundle/release/app-release.aab
+      - name: Publier la Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Trame.apk
+          generate_release_notes: true
+
+  ios:
+    name: iOS (vérification)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Appli web
+        run: |
+          npm ci
+          npm run build:web
+          npx cap sync ios
+      - name: Compiler (simulateur, sans signature)
+        run: |
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build | tail -20

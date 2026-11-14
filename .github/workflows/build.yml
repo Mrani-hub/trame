@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      SIGNING_KEY: ${{ secrets.TRAME_SIGNING_KEY }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -43,17 +44,31 @@ jobs:
         run: |
           echo "TRAME_VERSION_NAME=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
           echo "TRAME_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
-      - name: Clé de signature
-        if: env.KS_B64 != ''
+      # Clé permanente : fichier chiffré dans android/signing/, déchiffré avec le secret TRAME_SIGNING_KEY.
+      - name: Clé de signature (fichier chiffré du dépôt)
+        if: env.SIGNING_KEY != ''
+        run: |
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in android/signing/trame-release.jks.enc \
+            -out "$RUNNER_TEMP/trame-release.jks" -pass env:SIGNING_KEY
+          {
+            echo "TRAME_KEYSTORE_PATH=$RUNNER_TEMP/trame-release.jks"
+            echo "TRAME_KEYSTORE_PASSWORD=$SIGNING_KEY"
+            echo "TRAME_KEY_ALIAS=trame"
+            echo "TRAME_KEY_PASSWORD=$SIGNING_KEY"
+          } >> "$GITHUB_ENV"
+          echo "::add-mask::$SIGNING_KEY"
+      - name: Clé de signature (secrets ANDROID_*)
+        if: env.SIGNING_KEY == '' && env.KS_B64 != ''
         run: |
           echo "$KS_B64" | base64 --decode > "$RUNNER_TEMP/trame-release.jks"
-          echo "TRAME_KEYSTORE_PATH=$RUNNER_TEMP/trame-release.jks" >> "$GITHUB_ENV"
+          {
+            echo "TRAME_KEYSTORE_PATH=$RUNNER_TEMP/trame-release.jks"
+            echo "TRAME_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+            echo "TRAME_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}"
+            echo "TRAME_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}"
+          } >> "$GITHUB_ENV"
       - name: Compiler
         working-directory: android
-        env:
-          TRAME_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          TRAME_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          TRAME_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
           if [ -n "$TRAME_KEYSTORE_PATH" ]; then

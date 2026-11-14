@@ -146,3 +146,11 @@ test('Sauvegarde chiffrée', async () => {
   await assert.rejects(readBackup(txt, 'faux'), /password/);
   assert.deepEqual(await readBackup(await makeBackup(data)), data);
 });
+
+import { waNumber } from '../src/core/logic.js';
+test('Numéros WhatsApp', () => {
+  assert.equal(waNumber('06 12 34 56 78'), '212612345678');
+  assert.equal(waNumber('+212 7 11 22 33 44'), '212711223344');
+  assert.equal(waNumber('0033 6 12 34 56 78'), '33612345678');
+  assert.equal(waNumber(''), '');
+});

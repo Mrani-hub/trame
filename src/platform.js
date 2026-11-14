@@ -7,6 +7,8 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
+import { AppLauncher } from '@capacitor/app-launcher';
+import { SpeechRecognition } from '@capgo/capacitor-speech-recognition';
 import { hash31 } from './core/text.js';
 
 export const native = Capacitor.isNativePlatform();
@@ -226,4 +228,42 @@ export async function updateWidget(payload) {
 export async function consumeLaunchAction() {
   if (platform !== 'android') return null;
   try { const r = await TrameWidget.consumeLaunch(); return r?.action ? r : null; } catch { return null; }
+}
+
+// ——— Dictée vocale (reconnaissance du système : Google sur Android, Apple sur iPhone) ———
+const WebSR = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+export const voiceSupported = () => native || !!WebSR;
+
+/** Écoute une phrase et renvoie le texte reconnu (ou '' si rien). */
+export async function listen(lang, prompt) {
+  if (native) {
+    const av = await SpeechRecognition.available().catch(() => ({ available: false }));
+    if (!av.available) throw new Error('unavailable');
+    let perm = await SpeechRecognition.checkPermissions();
+    if (perm.speechRecognition !== 'granted') perm = await SpeechRecognition.requestPermissions();
+    if (perm.speechRecognition !== 'granted') throw new Error('permission denied');
+    const r = await SpeechRecognition.start({ language: lang, maxResults: 3, prompt, popup: platform === 'android', partialResults: false, addPunctuation: false });
+    return (r?.matches || [])[0] || '';
+  }
+  return new Promise((resolve, reject) => {
+    const rec = new WebSR();
+    rec.lang = lang; rec.interimResults = false; rec.maxAlternatives = 1;
+    rec.onresult = (e) => resolve(e.results?.[0]?.[0]?.transcript || '');
+    rec.onerror = (e) => reject(new Error(e.error || 'voice'));
+    rec.onend = () => resolve('');
+    rec.start();
+  });
+}
+
+// ——— WhatsApp ———
+/** Ouvre WhatsApp avec le message prêt (et le contact si le numéro est connu). */
+export async function openWhatsApp(text, phone = '') {
+  const q = `text=${encodeURIComponent(text)}`;
+  if (native) {
+    try {
+      await AppLauncher.openUrl({ url: `whatsapp://send?${phone ? `phone=${phone}&` : ''}${q}` });
+      return;
+    } catch { /* WhatsApp absent : on passe par le lien web */ }
+  }
+  return openUrl(`https://wa.me/${phone}?${q}`);
 }

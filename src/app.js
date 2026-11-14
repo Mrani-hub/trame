@@ -9,7 +9,7 @@ import {
   weekdayShort, monthTitle, durationLabel, digits,
 } from './core/dates.js';
 import {
-  findConflicts, conflictKeys, freeSlots, suggestPlacements, searchAll, buildContext, buildICS, seriesSig, noteText,
+  waNumber, findConflicts, conflictKeys, freeSlots, suggestPlacements, searchAll, buildContext, buildICS, seriesSig, noteText,
 } from './core/logic.js';
 import { makeBackup, readBackup, isEncrypted, makeShare, readShare } from './core/backup.js';
 import { noteToText, noteToPdf } from './export.js';
@@ -18,12 +18,12 @@ import { noteToText, noteToPdf } from './export.js';
 const DEFAULT_SETTINGS = {
   lang: 'fr', theme: 'auto', calMode: 'both', hijriOffset: 0, digits: 'latin', writeCal: '', hiddenCals: [],
   contextLead: 15, defaultDur: 60, dayStart: 8, dayEnd: 18, taskDueReminder: true, onboarded: false,
-  updateUrl: 'https://raw.githubusercontent.com/Mrani-hub/trame/main/version.json',
+  updateUrl: 'https://raw.githubusercontent.com/Mrani-hub/trame/main/version.json', voiceLang: 'auto', lastUpdateCheck: 0,
 };
 const state = {
-  data: { format: 1, tasks: [], notes: [], localEvents: [], eventMeta: {}, settings: { ...DEFAULT_SETTINGS } },
+  data: { format: 1, tasks: [], notes: [], localEvents: [], eventMeta: {}, contacts: {}, settings: { ...DEFAULT_SETTINGS } },
   view: 'today', cursor: startOfDay(new Date()), agendaMode: 'week', monthCal: null, selDay: startOfDay(new Date()),
-  taskFilter: 'open', query: '', events: [], range: null, calendars: [], calPerm: false, sheet: null,
+  taskFilter: 'open', query: '', update: null, appVersion: '', listening: false, events: [], range: null, calendars: [], calPerm: false, sheet: null,
 };
 const S = () => state.data.settings;
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -42,6 +42,9 @@ const ICONS = {
   left: '<path d="M15 5l-7 7 7 7"/>', right: '<path d="M9 5l7 7-7 7"/>', check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
   moon: '<path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/>', clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21M8.5 21h7"/>',
+  wa: '<path d="M4 20l1.2-3.6A8 8 0 1112 20a8 8 0 01-3.9-1z"/><path d="M9 9.2c.3 2.4 2.2 4.6 5 5.4l1.2-1.2-1.6-1-.8.6c-.9-.4-1.8-1.3-2.2-2.2l.6-.8-1-1.6z"/>',
+  download: '<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14"/>',
   review: '<path d="M4 12a8 8 0 1014.3-4.9M18.5 3v4.5H14"/>', users: '<circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0M16 5.5a3 3 0 010 5.5M17.5 14a5 5 0 013.5 5"/>',
 };
 const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
@@ -105,6 +108,7 @@ async function render() {
     </header>
     <form class="capture" id="capForm" autocomplete="off">
       <input id="capIn" enterkeyhint="send" placeholder="${esc(t('capturePh'))}" aria-label="${esc(t('capturePh'))}">
+      ${P.voiceSupported() ? `<button type="button" class="micbtn ${state.listening ? 'on' : ''}" data-act="voice" aria-label="${esc(t('voice'))}">${icon('mic')}</button>` : ''}
       <button class="capbtn" aria-label="+">${icon('plus')}</button>
     </form>
     <main id="main">${views[state.view]()}</main>
@@ -148,6 +152,7 @@ function viewToday() {
   const planned = plannedBlocks(today);
   const timeline = [...evs, ...planned].sort((a, b) => a.start - b.start);
   return `
+    ${state.update?.available ? `<div class="banner upd"><div><b>${t('updateAvailShort', D(state.update.latest))}</b>${state.update.notes ? `<small>${esc(state.update.notes)}</small>` : ''}</div><button class="btn primary" data-act="install">${icon('download')} ${t('install')}</button></div>` : ''}
     ${!state.calPerm && P.native ? `<div class="banner"><div><b>${t('connectCal')}</b><small>${t('connectCalHint')}</small></div><button class="btn" data-act="connect">${t('connectCal').split(' ')[0]}</button></div>` : ''}
     <section class="brief">
       <div class="brief-main">${brief.map((b, i) => `<span class="${i === 2 ? 'warn' : ''}">${esc(b)}</span>`).join('<i>·</i>')}</div>
@@ -332,7 +337,7 @@ function closeSheet() {
 function renderSheet() {
   const s = state.sheet, el = $('#sheet');
   if (!s) { el.innerHTML = ''; el.className = ''; return; }
-  const renderers = { edit: sheetEdit, event: sheetEvent, note: sheetNote, settings: sheetSettings, review: sheetReview, welcome: sheetWelcome };
+  const renderers = { wa: sheetWhatsApp, edit: sheetEdit, event: sheetEvent, note: sheetNote, settings: sheetSettings, review: sheetReview, welcome: sheetWelcome };
   el.className = 'open' + (s.kind === 'note' ? ' full' : '');
   el.innerHTML = `<div class="scrim" data-act="close"></div><div class="panel" role="dialog">${renderers[s.kind]()}</div>`;
   if (s.kind === 'edit') updateEditDerived();
@@ -361,6 +366,7 @@ function sheetEdit() {
   return `<form id="editForm" class="form">
     <div class="sheet-head"><b>${d.existing ? t('edit') : d.parsed ? t('confirmTitle') : t('save')}</b><button type="button" class="iconbtn" data-act="close" aria-label="${t('close')}">✕</button></div>
     ${d.parsed ? `<p class="hint">${t('parsedHint')}</p>` : ''}
+    ${d.heard ? `<p class="heard">${icon('mic')} « ${esc(d.heard)} »</p>` : ''}
     ${!d.existing ? `<div class="seg types">${types.map((x) => `<button type="button" data-act="etype" data-t="${x}" class="${d.type === x ? 'on' : ''}">${t(tName[x])}</button>`).join('')}</div>` : ''}
     ${d.type !== 'note' ? `<label>${t('title')}<input name="title" value="${esc(d.title)}" required></label>` : `<label>${t('title')}<input name="title" value="${esc(d.title)}" placeholder="${esc(t('noteTitlePh'))}"></label><label>${t('body')}<textarea name="body" rows="5">${esc(d.body)}</textarea></label>`}
     ${d.type !== 'note' ? `
@@ -397,6 +403,7 @@ function sheetEdit() {
     ${d.warnings?.includes('defaultTime') ? `<p class="warnline">${icon('warn')} ${t('defaultTimeWarn')}</p>` : ''}
     <div class="actions">
       ${d.existing ? `<button type="button" class="btn danger ghost" data-act="edel">${t('del')}</button>` : ''}
+      ${d.existing?.kind === 'task' ? `<button type="button" class="btn wa" data-act="taskwa">${icon('wa')} WhatsApp</button>` : ''}
       <button type="button" class="btn ghost" data-act="close">${t('cancel')}</button>
       <button class="btn primary">${t('save')}</button>
     </div>
@@ -523,6 +530,7 @@ function sheetEvent() {
       <div class="what"><b>${esc(r.note.title || t('untitled'))}</b><small>${r.why.map((w) => t(why[w])).join(' · ')} · ${D(fmtDate(r.note.updated, { weekday: false }))}</small></div></button>`).join('')}</div>` : ''}
     <div class="actions wrap">
       <button class="btn primary" data-act="evnote">${icon('users')} ${t('newMeeting')}</button>
+      <button class="btn wa" data-act="evwa">${icon('wa')} WhatsApp</button>
       <button class="btn ghost" data-act="evics">${icon('share')} ${t('shareIcs')}</button>
       <button class="btn ghost" data-act="evedit">${t('edit')}</button>
     </div>`;
@@ -636,7 +644,12 @@ function sheetSettings() {
   const writable = state.calendars.filter((c) => c.writable);
   return `<div class="sheet-head"><b>${t('settings')}</b><button class="iconbtn" data-act="close">✕</button></div>
   <div class="form" id="setForm">
+    <div class="upd-box">
+      <div><b>Trame ${D(state.appVersion || '')}</b><small>${state.update?.available ? t('updateAvailShort', D(state.update.latest)) : state.update ? t('upToDate') : t('updateNever')}</small></div>
+      ${state.update?.available ? `<button class="btn primary" data-act="install">${icon('download')} ${t('install')}</button>` : `<button class="btn" data-act="update">${t('checkUpdate')}</button>`}
+    </div>
     <label>${t('sLang')}<select data-set="lang">${opt('fr', s.lang, 'Français')}${opt('ar', s.lang, 'العربية')}</select></label>
+    ${P.voiceSupported() ? `<label>${t('sVoiceLang')}<select data-set="voiceLang">${opt('auto', s.voiceLang, t('voiceAuto'))}${opt('fr-FR', s.voiceLang, 'Français')}${opt('ar-MA', s.voiceLang, 'العربية (المغرب)')}</select></label>` : ''}
     <label>${t('sTheme')}<select data-set="theme">${opt('auto', s.theme, t('themeAuto'))}${opt('light', s.theme, t('themeLight'))}${opt('dark', s.theme, t('themeDark'))}</select></label>
     <label>${t('sCalMode')}<select data-set="calMode">${opt('both', s.calMode, t('modeBoth'))}${opt('greg', s.calMode, t('modeGreg'))}${opt('hijri', s.calMode, t('modeHijri'))}</select></label>
     <label>${t('sHijriOffset')}<select data-set="hijriOffset" data-num="1">${[-2, -1, 0, 1, 2].map((n) => opt(n, s.hijriOffset, (n > 0 ? '+' : '') + n)).join('')}</select>
@@ -660,7 +673,6 @@ function sheetSettings() {
     <div class="actions wrap"><button class="btn ghost" data-act="backup">${t('exportBackup')}</button><button class="btn ghost" data-act="import">${t('importFile')}</button></div>
     <h3>${t('sUpdates')}</h3>
     <label>${t('updateUrl')}<input data-set="updateUrl" value="${esc(s.updateUrl)}" dir="ltr"></label>
-    <div class="actions wrap"><button class="btn ghost" data-act="update">${t('checkUpdate')}</button><small id="verLbl"></small></div>
     <h3>${t('sPrivacy')}</h3><p class="hint">${t('privacyText')}</p>
   </div>`;
 }
@@ -681,6 +693,87 @@ function sheetWelcome() {
   return `<div class="welcome"><span class="logo big">T</span><h2>${t('welcome')}</h2><p>${t('welcomeText')}</p>
     <div class="seg center"><button data-act="wlang" data-l="fr" class="${S().lang === 'fr' ? 'on' : ''}">Français</button><button data-act="wlang" data-l="ar" class="${S().lang === 'ar' ? 'on' : ''}">العربية</button></div>
     <button class="btn primary wide" data-act="wstart">${t('start_')}</button></div>`;
+}
+
+// ——— Mises à jour ———
+async function checkForUpdate(force = false) {
+  const s = S();
+  if (!s.updateUrl) return null;
+  if (!force && Date.now() - (s.lastUpdateCheck || 0) < 6 * 3600000 && state.update) return state.update;
+  try {
+    const u = await P.checkUpdate(s.updateUrl);
+    state.update = u; s.lastUpdateCheck = Date.now(); P.saveData(state.data);
+    return u;
+  } catch (e) { console.warn('update', e); return null; }
+}
+
+// ——— Dictée vocale ———
+async function startVoice() {
+  if (state.listening) return;
+  const s = S();
+  const lang = s.voiceLang && s.voiceLang !== 'auto' ? s.voiceLang : s.lang === 'ar' ? 'ar-MA' : 'fr-FR';
+  state.listening = true; render();
+  try {
+    const text = await P.listen(lang, t('voicePrompt'));
+    if (!text) { toast(t('voiceNothing')); return; }
+    const r = parseQuick(text, new Date(), { hijriOffset: s.hijriOffset });
+    openSheet({ kind: 'edit', draft: { ...draftFromParse(r), heard: text } });
+  } catch (e) {
+    toast(/permission|denied/i.test(String(e?.message || e)) ? t('voiceDenied') : t('voiceFail'));
+  } finally { state.listening = false; render(); }
+}
+
+// ——— Envoi par WhatsApp ———
+function eventMessage(e) {
+  const s = S(), ar = s.lang === 'ar';
+  const people = [...new Set([...(e.attendees || []).map((a) => a.name || a.email), ...(e.participants || [])])].filter(Boolean);
+  return [
+    `📅 *${e.title || t('untitled')}*`,
+    `🗓 ${dateLabel(new Date(e.start), { ...s, calMode: s.calMode === 'greg' ? 'greg' : 'both' }, { year: true })}`,
+    `🕘 ${e.allDay ? t('allDay') : `${fmtTime(e.start)} – ${fmtTime(e.end)}`}`,
+    e.location ? `📍 ${e.location}` : null,
+    people.length ? `👥 ${people.join(ar ? '، ' : ', ')}` : null,
+    e.description ? `\n${e.description.slice(0, 500)}` : null,
+    '', `_${t('fromTrame')}_`,
+  ].filter((x) => x !== null).join('\n');
+}
+function taskMessage(x) {
+  const s = S();
+  return [
+    `✅ *${x.title}*`,
+    x.due ? `📆 ${t('due')} : ${dateLabel(new Date(x.due), s, { year: true })}` : null,
+    x.remindAt ? `⏰ ${fmtDate(x.remindAt, { weekday: true })} ${fmtTime(x.remindAt)}` : null,
+    x.assignee ? `👤 ${t('assignee')} : ${x.assignee}` : null,
+    x.durationMin ? `⏱ ${durationLabel(x.durationMin, s.lang)}` : null,
+    '', `_${t('fromTrame')}_`,
+  ].filter((v) => v !== null).join('\n');
+}
+const whoOf = (e) => [...new Set([...(e.attendees || []).map((a) => a.name).filter(Boolean), ...(e.participants || [])])];
+function openWhatsApp(text, people = []) {
+  const known = people.map((p) => ({ name: p, phone: state.data.contacts[norm(p)] || '' }));
+  openSheet({ kind: 'wa', text, people: known, ev: state.sheet?.kind === 'event' ? state.sheet.ev : null, back: state.sheet, phone: known.length === 1 ? known[0].phone : '', name: known.length === 1 ? known[0].name : '' });
+}
+function sheetWhatsApp() {
+  const w = state.sheet;
+  return `<div class="sheet-head"><button class="iconbtn" data-act="waback" aria-label="${t('close')}">${icon(S().lang === 'ar' ? 'right' : 'left')}</button><b>${icon('wa')} WhatsApp</b><button class="iconbtn" data-act="close">✕</button></div>
+  <div class="form" id="waForm">
+    ${w.people.length > 1 ? `<div class="seg">${w.people.map((p, i) => `<button type="button" data-act="wapick" data-i="${i}" class="${w.name === p.name ? 'on' : ''}">${esc(p.name)}</button>`).join('')}</div>` : ''}
+    <div class="two"><label>${t('waName')}<input name="name" value="${esc(w.name)}"></label>
+    <label>${t('waPhone')}<input name="phone" type="tel" inputmode="tel" dir="ltr" value="${esc(w.phone)}" placeholder="06 12 34 56 78"></label></div>
+    <p class="hint">${t('waHint')}</p>
+    <label>${t('waMessage')}<textarea name="text" rows="9">${esc(w.text)}</textarea></label>
+    <div class="actions wrap">
+      ${w.ev ? `<button type="button" class="btn ghost" data-act="waics">${icon('share')} ${t('shareIcs')}</button>` : ''}
+      <button type="button" class="btn wa" data-act="wasend">${icon('wa')} ${t('waSend')}</button>
+    </div>
+  </div>`;
+}
+async function sendWhatsApp() {
+  const f = $('#waForm'); const w = state.sheet;
+  const name = f.querySelector('[name=name]').value.trim(), phone = waNumber(f.querySelector('[name=phone]').value);
+  const text = f.querySelector('[name=text]').value;
+  if (name && phone) { state.data.contacts[norm(name)] = phone; persist(); }
+  await P.openWhatsApp(text, phone);
 }
 
 // ——— Widget ———
@@ -743,7 +836,7 @@ async function rescheduleNotifs() {
 // ——— Actions ———
 const actions = {
   view: (b) => { state.view = b.dataset.v; if (state.view === 'agenda') state.cursor = startOfDay(new Date()); render(); window.scrollTo(0, 0); },
-  settings: () => { openSheet({ kind: 'settings' }); P.appVersion().then((v) => { const l = $('#verLbl'); if (l) l.textContent = `${t('version')} ${v}`; }); },
+  settings: () => openSheet({ kind: 'settings' }),
   close: () => { const wasNote = state.sheet?.kind === 'note'; closeSheet(); if (wasNote) render(); },
   connect: async () => {
     state.calPerm = await P.calendarPermission(true);
@@ -855,12 +948,21 @@ const actions = {
     } catch (e) { toast(e.message === 'password' ? t('badPwd') : t('badFile')); }
   },
   update: async () => {
-    try {
-      const u = await P.checkUpdate(S().updateUrl);
-      if (u.available) { if (confirm(t('updateAvail', u.latest) + (u.notes ? '\n\n' + u.notes : ''))) P.openUrl(u.url); }
-      else toast(t('upToDate'));
-    } catch { toast(t('updateFail')); }
+    toast(t('checking'));
+    const u = await checkForUpdate(true);
+    if (!u) toast(t('updateFail'));
+    else if (!u.available) toast(t('upToDate'));
+    if (state.sheet) renderSheet();
+    render();
   },
+  install: () => { if (state.update?.url) { P.openUrl(state.update.url); toast(t('installHint')); } },
+  voice: () => startVoice(),
+  evwa: () => openWhatsApp(eventMessage(state.sheet.ev), whoOf(state.sheet.ev)),
+  taskwa: () => { const x = state.data.tasks.find((k) => k.id === state.sheet.draft.existing.id); if (x) openWhatsApp(taskMessage(x), x.assignee ? [x.assignee] : []); },
+  wasend: () => sendWhatsApp(),
+  wapick: (b) => { const w = state.sheet; const f = $('#waForm'); w.text = f.querySelector('[name=text]').value; const p = w.people[+b.dataset.i]; w.name = p.name; w.phone = p.phone; renderSheet(); },
+  waics: () => { const w = state.sheet; if (w.ev) P.shareFile(`${(w.ev.title || 'rdv').slice(0, 40)}.ics`, buildICS(w.ev, { lang: S().lang, hijriOffset: S().hijriOffset }), 'text/calendar', t('shareIcs')); },
+  waback: () => { const w = state.sheet; state.sheet = w.back; renderSheet(); },
   wlang: (b) => { S().lang = b.dataset.l; setLang(S().lang); persist(); render(); renderSheet(); },
   wstart: async () => {
     S().onboarded = true; persist(); closeSheet();
@@ -870,7 +972,7 @@ const actions = {
 };
 
 function normalizeData(d) {
-  const out = { format: 1, tasks: [], notes: [], localEvents: [], eventMeta: {}, ...(d || {}) };
+  const out = { format: 1, tasks: [], notes: [], localEvents: [], eventMeta: {}, contacts: {}, ...(d || {}) };
   out.settings = { ...DEFAULT_SETTINGS, ...(d?.settings || {}) };
   return out;
 }
@@ -927,7 +1029,7 @@ async function init() {
       if (x.kind === 'event') { state.view = 'today'; await render(); openEventByKey(x.key, x.start); }
       if (x.kind === 'task') openTaskEditor(x.id);
     });
-    P.App.addListener('resume', async () => { invalidate(); await render(); rescheduleNotifs(); pushWidget(); handleLaunch(); });
+    P.App.addListener('resume', async () => { invalidate(); await render(); rescheduleNotifs(); pushWidget(); handleLaunch(); checkForUpdate().then((u) => { if (u?.available) render(); }); });
     P.App.addListener('backButton', () => {
       if ($('#shareMenu')) $('#shareMenu').remove();
       else if (state.sheet) { closeSheet(); render(); }
@@ -941,6 +1043,8 @@ async function init() {
   rescheduleNotifs();
   pushWidget();
   handleLaunch();
+  state.appVersion = await P.appVersion();
+  checkForUpdate().then((u) => { if (u?.available) render(); });
 }
 
 init();

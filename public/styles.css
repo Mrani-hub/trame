@@ -172,3 +172,14 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; }
 .welcome p { color: var(--muted); }
 #toast { position: fixed; bottom: calc(80px + var(--safe-b)); left: 50%; transform: translate(-50%, 20px); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 12px; opacity: 0; pointer-events: none; transition: .2s; z-index: 40; max-width: 90vw; font-size: 14px; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* Dictée, WhatsApp, mises à jour */
+.micbtn { display: grid; place-items: center; width: 42px; border-radius: 12px; color: var(--navy); background: var(--bg); }
+.micbtn.on { background: #dc2626; color: #fff; animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: .6; } }
+.btn.wa { background: #25D366; border-color: #25D366; color: #06331b; }
+.heard { margin: 0; padding: 8px 10px; border-radius: 10px; background: var(--bg); color: var(--muted); font-size: 14px; font-style: italic; }
+.heard .ic { width: 16px; height: 16px; }
+.upd-box { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: var(--bg); border-radius: 12px; padding: 10px 12px; }
+.upd-box small { display: block; color: var(--muted); }
+.banner.upd { border-style: solid; border-color: var(--accent); }

@@ -153,3 +153,12 @@ export function buildICS(ev, { lang = 'fr', hijriOffset = 0 } = {}) {
   ].filter(Boolean);
   return lines.map(fold).join('\r\n') + '\r\n';
 }
+
+/** Numéro au format international sans « + » (06… / 07… → 2126… / 2127… pour le Maroc). */
+export function waNumber(raw) {
+  let d = String(raw || '').replace(/[^\d+]/g, '');
+  if (d.startsWith('+')) d = d.slice(1);
+  else if (d.startsWith('00')) d = d.slice(2);
+  else if (/^0[5-7]\d{8}$/.test(d)) d = '212' + d.slice(1);
+  return d.replace(/\D/g, '');
+}

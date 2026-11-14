@@ -3,7 +3,7 @@
 Application Android (puis iOS) qui s'ajoute **par-dessus** les agendas du téléphone (Google, Outlook…) et y relie tâches, rappels et comptes rendus de réunion.
 Tout reste sur le téléphone : aucun compte, aucun serveur.
 
-## Ce que contient la version 0.1.0 (MVP complet)
+## Ce que contient la version 0.2.0
 
 | Fonction | Détail |
 |---|---|
@@ -19,7 +19,11 @@ Tout reste sur le téléphone : aucun compte, aucun serveur.
 | Recherche | Plein texte FR/AR, insensible aux accents et aux harakat. |
 | Partage | Rendez-vous en `.ics`, notes en texte, PDF (arabe correctement rendu) ou fichier `.trame` importable par un autre utilisateur. |
 | Sauvegarde | Export JSON chiffré (AES-256, mot de passe) et restauration. |
-| Mises à jour | Vérification d'un fichier `version.json` public et téléchargement du nouvel APK. |
+| Mises à jour | Vérification automatique au démarrage (bandeau « Installer ») + bouton « Vérifier maintenant » en tête des Réglages. |
+| Dictée vocale | Bouton micro : rendez-vous, tâche, rappel ou note dictés en FR ou AR, puis carte de confirmation. |
+| WhatsApp | Envoi d'un rendez-vous ou d'une tâche à un collègue (numéro mémorisé), invitation .ics en option. |
+| Widget | Rendez-vous et tâches du jour sur l'écran d'accueil, navigation jour par jour. |
+| Mode sombre | Automatique, clair ou sombre. |
 
 ## Arborescence
 
@@ -53,24 +57,12 @@ android/ ios/  projets natifs Capacitor (permissions, icônes, signature déjà 
 
 > Si votre compte GitHub ou le nom du dépôt diffèrent, modifiez l'adresse dans `version.json` et dans `src/app.js` (`updateUrl`), ou directement dans les Réglages de l'appli.
 
-## 2. Créer la clé de signature (à faire une seule fois)
+## 2. Clé de signature (déjà créée)
 
-Sans clé, GitHub produit un APK « debug » : il s'installe, mais **chaque mise à jour devra être signée avec la même clé**, et le Play Store l'exigera aussi. Créez-la tout de suite :
+La clé permanente est dans `android/signing/trame-release.jks.enc`, **chiffrée** (AES-256). GitHub la déchiffre avec le secret
+**`TRAME_SIGNING_KEY`** (Settings → Secrets and variables → Actions). Sans ce secret, GitHub produit un APK de test signé avec une clé temporaire.
 
-```
-keytool -genkeypair -v -keystore trame-release.jks -alias trame -keyalg RSA -keysize 2048 -validity 10000
-```
-
-Puis dans le dépôt GitHub → **Settings → Secrets and variables → Actions → New repository secret** :
-
-| Secret | Valeur |
-|---|---|
-| `ANDROID_KEYSTORE_BASE64` | contenu de `base64 -w0 trame-release.jks` (Windows : `certutil -encode` puis retirer les lignes BEGIN/END) |
-| `ANDROID_KEYSTORE_PASSWORD` | mot de passe du fichier |
-| `ANDROID_KEY_ALIAS` | `trame` |
-| `ANDROID_KEY_PASSWORD` | mot de passe de la clé |
-
-**Sauvegardez `trame-release.jks` et ses mots de passe à deux endroits.** Perdre la clé = impossible de mettre à jour l'appli chez les utilisateurs.
+Gardez précieusement une copie de `trame-release.jks` et de sa phrase secrète : la même clé sera exigée pour chaque mise à jour et pour le Play Store.
 
 ## 3. Installer sur un téléphone
 

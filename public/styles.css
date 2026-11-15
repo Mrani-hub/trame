@@ -229,3 +229,9 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; }
 .seg.compact button { padding: 6px 11px; font-size: 13px; white-space: nowrap; flex: none; }
 .seg.compact .ic { width: 16px; height: 16px; }
 .mchip[dir="auto"] { unicode-bidi: plaintext; }
+.colors { display: flex; flex-direction: column; gap: 6px; }
+.colors small { color: var(--muted); font-size: 13px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatch { width: 30px; height: 30px; border-radius: 50%; background: var(--sw); border: 2px solid var(--card); box-shadow: 0 0 0 1px var(--line);
+  display: grid; place-items: center; font-size: 12px; font-weight: 700; color: var(--muted); }
+.swatch.on { box-shadow: 0 0 0 2px var(--ink); }

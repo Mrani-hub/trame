@@ -82,7 +82,8 @@ async function ensureRange(from, to, force = false) {
   const f = Math.min(from, addDays(today, -14).getTime());
   const tt = Math.max(to, addDays(today, 21).getTime());
   if (!force && state.range && state.range[0] <= from && state.range[1] >= to) return;
-  const device = state.calPerm ? await P.listDeviceEvents(f, tt) : [];
+  let device = state.calPerm ? await P.listDeviceEvents(f, tt) : [];
+  if (device === null) device = state.events.filter((e) => e.source === 'device'); // lecture échouée : on garde l'affichage précédent
   const hidden = new Set(S().hiddenCals);
   const locals = expandLocal(f, tt);
   const bdCals = new Set(state.calendars.filter((c) => c.birthday).map((c) => c.id));
@@ -91,7 +92,7 @@ async function ensureRange(from, to, force = false) {
     .map((e) => (bdCals.has(e.calendarId) || yearly.has(e.id) ? { ...e, birthday: true, allDay: true } : e));
   const bdShown = S().birthdays !== 'hide';
   state.events = [...dev.filter((e) => bdShown || !e.birthday), ...(bdShown ? contactBirthdayEvents(f, tt, dev.filter((e) => e.birthday)) : []), ...locals]
-    .map((e) => { const m = metaOf(e); return { ...e, participants: m.participants || [], rule: e.repeat || m.rule || state.data.series[m.series]?.rule || null, seriesId: m.series || null, period: !!(e.period || m.period), periodStart: m.start || null }; })
+    .map((e) => { const m = metaOf(e); return { ...e, color: m.color || e.color, ownColor: m.color || (e.source === 'local' ? e.color : '') || '', participants: m.participants || [], rule: e.repeat || m.rule || state.data.series[m.series]?.rule || null, seriesId: m.series || null, period: !!(e.period || m.period), periodStart: m.start || null }; })
     .sort((a, b) => a.start - b.start);
   state.range = [f, tt];
 }
@@ -334,6 +335,9 @@ function monthView() {
   return `<div class="month full"><div class="wd">${wd}</div><div class="mgrid" style="--rows:${cells.length / 7}">${cells.join('')}</div></div>
     <p class="hint center">${t('dblTapHint')}</p>${dayBlock(state.selDay)}`;
 }
+/** Couleurs proposées (palette de Google Agenda) ; '' = couleur de l'agenda d'origine. */
+const COLORS = [['', 'colAgenda'], ['#D50000', 'colTomato'], ['#E67C73', 'colFlamingo'], ['#F4511E', 'colTangerine'], ['#F6BF26', 'colBanana'], ['#33B679', 'colSage'],
+  ['#0B8043', 'colBasil'], ['#039BE5', 'colPeacock'], ['#3F51B5', 'colBlueberry'], ['#7986CB', 'colLavender'], ['#8E24AA', 'colGrape'], ['#616161', 'colGraphite']];
 /** Couleur CSS valide à partir de la couleur d'un agenda (#RRGGBB, #AARRGGBB ou entier Android). */
 function normColor(c) {
   if (c == null || c === '') return null;
@@ -417,7 +421,7 @@ function closeSheet() {
 function renderSheet() {
   const s = state.sheet, el = $('#sheet');
   if (!s) { el.innerHTML = ''; el.className = ''; return; }
-  const renderers = { delrep: sheetDelRep, wa: sheetWhatsApp, edit: sheetEdit, event: sheetEvent, note: sheetNote, settings: sheetSettings, review: sheetReview, welcome: sheetWelcome };
+  const renderers = { editscope: sheetEditScope, delrep: sheetDelRep, wa: sheetWhatsApp, edit: sheetEdit, event: sheetEvent, note: sheetNote, settings: sheetSettings, review: sheetReview, welcome: sheetWelcome };
   el.className = 'open' + (s.kind === 'note' ? ' full' : '');
   el.innerHTML = `<div class="scrim" data-act="close"></div><div class="panel" role="dialog">${renderers[s.kind]()}</div>`;
   if (s.kind === 'edit') updateEditDerived();
@@ -476,6 +480,7 @@ function sheetEdit() {
       </div>
       <div id="conflictBox"></div>
       <label>${t('location')}<input name="location" value="${esc(d.location)}"></label>
+      <div class="colors"><small>${t('color')}</small><div class="swatches">${COLORS.map(([c, n]) => `<button type="button" class="swatch ${(d.color || '') === c ? 'on' : ''}" data-act="pickcolor" data-c="${c}" title="${esc(t(n))}" style="--sw:${c || 'transparent'}">${c ? '' : 'A'}</button>`).join('')}</div></div>
       <label>${t('participants')}<input name="participants" value="${esc((d.participants || []).join(', '))}" placeholder="${esc(t('participantsPh'))}"></label>
       ${!d.existing || d.existing.source === 'local' ? `<label>${t('calendar')}<select name="calendarId">
         ${cals.map((c) => `<option value="${esc(c.id)}" ${d.calendarId === c.id ? 'selected' : ''}>${esc(c.title)}${c.account && c.account !== c.title ? ' — ' + esc(c.account) : ''}</option>`).join('')}
@@ -593,8 +598,8 @@ async function updateEditDerived() {
   } else if (box) box.innerHTML = '';
 }
 
-async function saveEdit() {
-  const d = readEditForm();
+async function saveEdit(draft = null) {
+  const d = draft || readEditForm();
   const s = S();
   if (d.type !== 'note' && !d.title) { toast(t('noTitleWarn')); return; }
   const now = Date.now();
@@ -607,32 +612,41 @@ async function saveEdit() {
     if (end <= start) end = start + s.defaultDur * MIN;
     const ev = { title: d.title, start, end, allDay: d.allDay, location: d.location };
     const rule = pRule ? normalizeRule(pRule, start) : d.multi ? null : d.repeat ? normalizeRule(d.repeat, start) : null;
+    const color = d.color ?? null; // '' = couleur de l'agenda
+    // Rendez-vous répétitif existant : « cette occurrence » ou « toute la série » ?
+    const isRec = d.existing && (d.existing.recurring || d.existing.seriesId);
+    if (isRec && !d.scope) { state.sheet = { kind: 'editscope', draft: d, back: state.sheet }; renderSheet(); return; }
     let key, metaKeys = [];
     try {
-      if (d.existing?.source === 'device') {
+      if (isRec) {
+        key = await saveRecurringEdit(d, ev, rule, color);
+      } else if (d.existing?.source === 'device') {
         const native = toNativeRule(rule, start);
         await P.modifyDeviceEvent({ ...ev, id: d.existing.id }, native);
         key = `cal:${d.existing.id}`;
+        if (color !== d.existing.color) await P.setEventColor(d.existing.id, color);
         if (rule && !native) metaKeys = await createGeneratedSeries(ev, rule, d.existing.calendarId, [d.existing.id]);
         else if (rule) state.data.eventMeta[key] = { ...(state.data.eventMeta[key] || {}), rule };
       } else if (d.existing?.source === 'local') {
         const base = state.data.localEvents.find((e) => e.id === d.existing.id);
         // une occurrence modifiée décale toute la série du même écart
         const delta = start - d.existing.start;
-        Object.assign(base, { title: ev.title, location: ev.location, allDay: ev.allDay, start: base.start + delta, end: base.start + delta + (end - start), repeat: rule });
+        Object.assign(base, { title: ev.title, location: ev.location, allDay: ev.allDay, start: base.start + delta, end: base.start + delta + (end - start), repeat: rule, color: color || null });
         key = `loc:${base.id}`;
       } else if (d.calendarId && d.calendarId !== 'local' && state.calPerm) {
         const native = toNativeRule(rule, start);
         if (rule && !native) { metaKeys = await createGeneratedSeries(ev, rule, d.calendarId, []); key = metaKeys[0]; }
         else {
           const id = await P.createDeviceEvent(ev, d.calendarId, s.contextLead, native); key = `cal:${id}`;
+          if (color) await P.setEventColor(id, color);
           if (rule) state.data.eventMeta[key] = { rule };
         }
         if (s.writeCal !== d.calendarId) s.writeCal = d.calendarId;
       } else {
         const id = uid('ev'); key = `loc:${id}`;
-        state.data.localEvents.push({ id, key, ...ev, repeat: rule, created: now });
+        state.data.localEvents.push({ id, key, ...ev, repeat: rule, color: color || null, created: now });
       }
+      if (metaKeys.length && color) for (const k of metaKeys) { await P.setEventColor(k.slice(4), color); }
     } catch (e) { console.error(e); toast(String(e.message || e)); return; }
     if (pRule) {
       const lb = state.data.localEvents.find((e) => e.key === key || `loc:${e.id}` === key);
@@ -640,6 +654,7 @@ async function saveEdit() {
       else state.data.eventMeta[key] = { ...(state.data.eventMeta[key] || {}), period: true, start, rule };
     }
     for (const k of metaKeys.length ? metaKeys : [key]) {
+      if (k && !k.startsWith('loc:')) state.data.eventMeta[k] = { ...(state.data.eventMeta[k] || {}), color: color || null };
       if (d.participants?.length) state.data.eventMeta[k] = { ...(state.data.eventMeta[k] || {}), participants: d.participants };
     }
     invalidate();
@@ -663,6 +678,58 @@ async function saveEdit() {
   persist(); closeSheet(); toast(t('saved')); render();
 }
 const firstLine = (s) => (s || '').split('\n')[0].slice(0, 60);
+
+/** Modification d'un rendez-vous répétitif selon la portée choisie (d.scope = 'this' | 'series'). Renvoie la clé méta. */
+async function saveRecurringEdit(d, ev, rule, color) {
+  const x = d.existing, shift = ev.start - x.start, duration = ev.end - ev.start;
+  if (x.source === 'local') {
+    const base = state.data.localEvents.find((e) => e.id === x.id);
+    if (d.scope === 'this') {
+      base.exdates = [...(base.exdates || []), x.start];
+      const id = uid('ev');
+      state.data.localEvents.push({ id, key: `loc:${id}`, ...ev, repeat: null, color: color || base.color || null, created: Date.now() });
+      return `loc:${id}`;
+    }
+    Object.assign(base, { title: ev.title, location: ev.location, allDay: ev.allDay, start: base.start + shift, end: base.start + shift + duration, color: color || null,
+      repeat: d.repTouched ? rule : base.repeat });
+    return `loc:${base.id}`;
+  }
+  if (x.seriesId && state.data.series[x.seriesId]) { // série générée par Trame (hégirien, 2e jeudi…)
+    const ser = state.data.series[x.seriesId];
+    const ids = d.scope === 'this' ? [x.id] : ser.ids;
+    for (const id of ids) await P.modifySeries(id, { title: ev.title, location: ev.location, shift, duration, allDay: ev.allDay, color, single: true });
+    if (d.scope !== 'this') ser.title = ev.title;
+    return `cal:${x.id}`;
+  }
+  if (d.scope === 'this') {
+    await P.modifyOccurrence(ev, x.rawStart ?? x.start, color);
+    return `cal:${x.id}@${ev.start}`;
+  }
+  const native = d.repTouched ? toNativeRule(rule, ev.start) : null;
+  await P.modifySeries(x.id, { title: ev.title, location: ev.location, shift, duration, allDay: ev.allDay, rrule: native ? rruleString(native) : null, color });
+  if (native) state.data.eventMeta[`cal:${x.id}`] = { ...(state.data.eventMeta[`cal:${x.id}`] || {}), rule };
+  return `cal:${x.id}`;
+}
+/** Règle native → chaîne RRULE (RFC 5545). */
+function rruleString(r) {
+  const D = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
+  const parts = [`FREQ=${r.frequency.toUpperCase()}`];
+  if (r.interval > 1) parts.push(`INTERVAL=${r.interval}`);
+  if (r.byWeekDay?.length) parts.push(`BYDAY=${r.byWeekDay.map((n) => D[n - 1]).join(',')}`);
+  if (r.count) parts.push(`COUNT=${r.count}`);
+  else if (r.end) { const u = new Date(r.end); parts.push(`UNTIL=${u.getUTCFullYear()}${String(u.getUTCMonth() + 1).padStart(2, '0')}${String(u.getUTCDate()).padStart(2, '0')}T235959Z`); }
+  return parts.join(';');
+}
+function sheetEditScope() {
+  const d = state.sheet.draft;
+  return `<div class="sheet-head"><b>${t('editRepTitle')}</b><button class="iconbtn" data-act="scopeback">✕</button></div>
+    <p class="meta">${esc(d.title)}</p>
+    <div class="actions col">
+      <button class="btn" data-act="scope" data-scope="this">${t('editThis')}</button>
+      <button class="btn primary" data-act="scope" data-scope="series">${t('editSeries')}</button>
+      <button class="btn ghost" data-act="scopeback">${t('cancel')}</button>
+    </div>`;
+}
 
 /** Règle non exprimable dans l'agenda du téléphone (hégirien, 2e jeudi…) : occurrences créées une à une, regroupées en série. */
 async function createGeneratedSeries(ev, rule, calendarId, existingIds) {
@@ -756,7 +823,8 @@ function openEventEditor(e) {
     multi: !!e.period || (e.allDay && e.end - e.start > DAY + 3600000),
     endDate: e.period && e.rule?.until ? ymd(e.rule.until) : e.allDay && e.end - e.start > DAY + 3600000 ? ymd(e.end - DAY) : '',
     workdays: !!(e.period && e.rule?.freq === 'weekly'),
-    existing: { kind: 'event', source: e.source, id: e.id, key: e.key, recurring: e.recurring, start: e.start },
+    color: e.ownColor || '',
+    existing: { kind: 'event', source: e.source, id: e.id, key: e.key, recurring: e.recurring, seriesId: e.seriesId, start: e.start, rawStart: e.rawStart, color: e.ownColor || '' },
   } });
 }
 
@@ -1074,7 +1142,8 @@ function pushWidget() {
     v: 1, lang: s.lang, calMode: s.calMode, birthdays: s.birthdays, hijriOffset: s.hijriOffset, digits: s.digits,
     hiddenCals: s.birthdays === 'hide' ? [...s.hiddenCals, ...state.calendars.filter((c) => c.birthday).map((c) => c.id)] : s.hiddenCals,
     calPerm: state.calPerm,
-    localEvents: [...expandLocal(from, from + 130 * DAY), ...(s.birthdays === 'hide' ? [] : contactBirthdayEvents(from, from + 130 * DAY, []))].map((e) => ({ id: e.id, title: e.title, start: e.start, end: e.end, allDay: !!e.allDay, location: e.location || '' })),
+    colors: Object.fromEntries(Object.entries(state.data.eventMeta).filter(([k, m]) => m.color && k.startsWith('cal:')).map(([k, m]) => [k.slice(4).split('@')[0], m.color])),
+    localEvents: [...expandLocal(from, from + 130 * DAY), ...(s.birthdays === 'hide' ? [] : contactBirthdayEvents(from, from + 130 * DAY, []))].map((e) => ({ id: e.id, title: e.title, start: e.start, end: e.end, allDay: !!e.allDay, location: e.location || '', color: e.color || '' })),
     tasks: state.data.tasks.filter((x) => !x.done && (x.due || x.remindAt || x.plannedStart)).map((x) => ({
       id: x.id, title: x.title, high: x.priority === 'high', reminder: !!x.isReminder,
       due: x.due || null, remindAt: x.remindAt || null, plannedStart: x.plannedStart || null, durationMin: x.durationMin || null,
@@ -1110,7 +1179,7 @@ async function rescheduleNotifs() {
   }
   if (s.contextLead > 0) {
     const from = Date.now(), to = from + 7 * DAY;
-    const device = state.calPerm ? await P.listDeviceEvents(from, to) : [];
+    const device = (state.calPerm ? await P.listDeviceEvents(from, to) : []) || [];
     const evs = [...device.filter((e) => !s.hiddenCals.includes(e.calendarId)), ...expandLocal(from, to).filter((e) => e.start > from)];
     for (const e of evs) {
       if (e.allDay) continue;
@@ -1124,7 +1193,7 @@ async function rescheduleNotifs() {
   }
   if (s.birthdays === 'remind') {
     const from = startOfDay(new Date()).getTime(), to = from + 8 * DAY;
-    const device = state.calPerm ? await P.listDeviceEvents(from, to) : [];
+    const device = (state.calPerm ? await P.listDeviceEvents(from, to) : []) || [];
     const bdCals = new Set(state.calendars.filter((c) => c.birthday).map((c) => c.id));
     const yearly = await P.yearlyAllDayIds(from, to);
     const bds = device.filter((e) => (bdCals.has(e.calendarId) || yearly.has(e.id)) && !s.hiddenCals.includes(e.calendarId));
@@ -1230,14 +1299,10 @@ const actions = {
   edel: () => deleteFromEdit(),
   evnote: () => { const ev = state.sheet.ev; newNote(true, ev); },
   evics: () => { const e = state.sheet.ev; P.shareFile(`${(e.title || 'rdv').slice(0, 40)}.ics`, buildICS(e, { lang: S().lang, hijriOffset: S().hijriOffset }), 'text/calendar', t('shareIcs')); },
-  evedit: async () => {
-    const e = state.sheet.ev;
-    if (e.source === 'device' && e.recurring && P.native) {
-      try { await P.editDeviceEventNative(e); } catch (err) { toast(String(err.message || err)); }
-      invalidate(); closeSheet(); render(); return;
-    }
-    openEventEditor(e);
-  },
+  evedit: () => openEventEditor(state.sheet.ev),
+  scope: (b) => { const d = state.sheet.draft; d.scope = b.dataset.scope; state.sheet = state.sheet.back; saveEdit(d); },
+  scopeback: () => { state.sheet = state.sheet.back; renderSheet(); },
+  pickcolor: (b) => { const f = $('#editForm'); if (!f) return; state.sheet.draft.color = b.dataset.c; $$('.swatch', f).forEach((x) => x.classList.toggle('on', x === b)); },
   delrep: (b) => deleteRecurring(state.sheet.ev, b.dataset.scope),
   decadd: () => { syncNoteFromDom(); state.sheet.note.meeting.decisions.push(''); renderSheet(); $$('[data-dec]').pop()?.focus(); },
   decdel: (b) => { syncNoteFromDom(); state.sheet.note.meeting.decisions.splice(+b.dataset.i, 1); renderSheet(); },
@@ -1367,6 +1432,7 @@ function bind() {
   });
   document.addEventListener('change', (ev) => {
     const el = ev.target;
+    if (el.closest('#editForm') && /^rep/.test(el.name || '')) state.sheet.draft.repTouched = true;
     if (el.closest('#editForm') && ['repeatPreset', 'repFreq', 'repEnd', 'date', 'multi', 'allDay'].includes(el.name)) {
       readEditForm();
       if (el.name !== 'date' || state.sheet.draft.repPreset !== 'custom') { renderSheet(); return; }

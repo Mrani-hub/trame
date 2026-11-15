@@ -1,5 +1,5 @@
 {
-  "version": "0.4.2",
+  "version": "0.5.0",
   "apk": "https://github.com/Mrani-hub/trame/releases/latest/download/Trame.apk",
-  "notes": "Anniversaires masqués aussi dans le widget, y compris ceux que Google Agenda range dans l'agenda principal."
+  "notes": "Modification complète dans Trame (y compris rendez-vous répétitifs : cette occurrence ou toute la série), choix de la couleur des rendez-vous, corrections d'affichage."
 }

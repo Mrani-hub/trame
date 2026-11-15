@@ -1,6 +1,15 @@
 package ma.trame.app;
 
+import android.content.ContentUris;
+import android.content.ContentValues;
+import android.content.ContentResolver;
 import android.content.Intent;
+import android.database.Cursor;
+import android.graphics.Color;
+import android.net.Uri;
+import android.provider.CalendarContract;
+import java.util.Calendar;
+import java.util.TimeZone;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -44,6 +53,105 @@ public class TrameWidgetPlugin extends Plugin {
         JSObject r = new JSObject();
         r.put("ids", ids);
         call.resolve(r);
+    }
+
+    // ——— Modification des rendez-vous répétitifs, directement dans l'agenda du téléphone ———
+
+    /** Minuit UTC du jour local d'un horodatage (format des journées entières dans CalendarContract). */
+    private static long utcMidnight(long t) {
+        Calendar l = Calendar.getInstance(); l.setTimeInMillis(t);
+        Calendar u = Calendar.getInstance(TimeZone.getTimeZone("UTC")); u.clear();
+        u.set(l.get(Calendar.YEAR), l.get(Calendar.MONTH), l.get(Calendar.DAY_OF_MONTH));
+        return u.getTimeInMillis();
+    }
+
+    private static void putColor(ContentValues v, String color) {
+        if (color == null) return;
+        if (color.isEmpty()) v.putNull(CalendarContract.Events.EVENT_COLOR);
+        else v.put(CalendarContract.Events.EVENT_COLOR, Color.parseColor(color));
+    }
+
+    /** « Cette occurrence seulement » : exception de la série avec les nouvelles valeurs. */
+    @PluginMethod
+    public void modifyOccurrence(PluginCall call) {
+        try {
+            String id = call.getString("id");
+            long instance = call.getLong("instanceDate");
+            long start = call.getLong("start"), end = call.getLong("end");
+            boolean allDay = Boolean.TRUE.equals(call.getBoolean("allDay", false));
+            ContentValues v = new ContentValues();
+            v.put(CalendarContract.Events.ORIGINAL_INSTANCE_TIME, instance);
+            v.put(CalendarContract.Events.STATUS, CalendarContract.Events.STATUS_CONFIRMED);
+            if (call.getString("title") != null) v.put(CalendarContract.Events.TITLE, call.getString("title"));
+            if (call.getString("location") != null) v.put(CalendarContract.Events.EVENT_LOCATION, call.getString("location"));
+            v.put(CalendarContract.Events.ALL_DAY, allDay ? 1 : 0);
+            if (allDay) {
+                v.put(CalendarContract.Events.DTSTART, utcMidnight(start));
+                v.put(CalendarContract.Events.DTEND, utcMidnight(end - 60000L) + 86400000L);
+                v.put(CalendarContract.Events.EVENT_TIMEZONE, "UTC");
+            } else {
+                v.put(CalendarContract.Events.DTSTART, start);
+                v.put(CalendarContract.Events.DTEND, end);
+                v.put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().getID());
+            }
+            putColor(v, call.getString("color"));
+            Uri uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_EXCEPTION_URI, Long.parseLong(id));
+            Uri r = getContext().getContentResolver().insert(uri, v);
+            if (r == null) { call.reject("exception"); return; }
+            JSObject o = new JSObject(); o.put("id", r.getLastPathSegment()); call.resolve(o);
+        } catch (Exception e) { call.reject(e.getMessage()); }
+    }
+
+    /** « Toute la série » : titre, lieu, couleur, heure et durée appliqués à la série (décalage relatif). */
+    @PluginMethod
+    public void modifySeries(PluginCall call) {
+        try {
+            long id = Long.parseLong(call.getString("id"));
+            long shift = call.getLong("shift", 0L);
+            long duration = call.getLong("duration", 3600000L);
+            boolean allDay = Boolean.TRUE.equals(call.getBoolean("allDay", false));
+            ContentResolver cr = getContext().getContentResolver();
+            Uri uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id);
+            long dtstart = 0;
+            try (Cursor c = cr.query(uri, new String[]{CalendarContract.Events.DTSTART}, null, null, null)) {
+                if (c != null && c.moveToFirst()) dtstart = c.getLong(0);
+            }
+            ContentValues v = new ContentValues();
+            if (call.getString("title") != null) v.put(CalendarContract.Events.TITLE, call.getString("title"));
+            if (call.getString("location") != null) v.put(CalendarContract.Events.EVENT_LOCATION, call.getString("location"));
+            v.put(CalendarContract.Events.ALL_DAY, allDay ? 1 : 0);
+            long newStart = dtstart + shift;
+            if (allDay) {
+                v.put(CalendarContract.Events.DTSTART, utcMidnight(newStart));
+                v.put(CalendarContract.Events.EVENT_TIMEZONE, "UTC");
+                v.put(CalendarContract.Events.DURATION, "P" + Math.max(1, Math.round(duration / 86400000.0)) + "D");
+            } else {
+                v.put(CalendarContract.Events.DTSTART, newStart);
+                v.put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().getID());
+                v.put(CalendarContract.Events.DURATION, "P" + (duration / 1000L) + "S");
+            }
+            boolean single = Boolean.TRUE.equals(call.getBoolean("single", false));
+            if (single) { // rendez-vous simple : DTEND au lieu de DURATION
+                v.putNull(CalendarContract.Events.DURATION);
+                v.put(CalendarContract.Events.DTEND, allDay ? utcMidnight(newStart) + Math.max(1, Math.round(duration / 86400000.0)) * 86400000L : newStart + duration);
+            } else v.putNull(CalendarContract.Events.DTEND);
+            if (call.getString("rrule") != null) v.put(CalendarContract.Events.RRULE, call.getString("rrule"));
+            putColor(v, call.getString("color"));
+            cr.update(uri, v, null, null);
+            call.resolve();
+        } catch (Exception e) { call.reject(e.getMessage()); }
+    }
+
+    /** Couleur d'un rendez-vous ("" = couleur de l'agenda). */
+    @PluginMethod
+    public void setEventColor(PluginCall call) {
+        try {
+            ContentValues v = new ContentValues();
+            putColor(v, call.getString("color", ""));
+            Uri uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, Long.parseLong(call.getString("id")));
+            getContext().getContentResolver().update(uri, v, null, null);
+            call.resolve();
+        } catch (Exception e) { call.reject(e.getMessage()); }
     }
 
     @PluginMethod

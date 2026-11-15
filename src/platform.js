@@ -84,19 +84,19 @@ export async function listDeviceEvents(from, to) {
     const utcDayToLocal = (t) => { const d = new Date(t); return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()).getTime(); };
     const isUtcMidnight = (t) => { const d = new Date(t); return d.getUTCHours() === 0 && d.getUTCMinutes() === 0; };
     return (result || []).map((e) => (e.isAllDay && isUtcMidnight(e.startDate)
-      ? { ...e, startDate: utcDayToLocal(e.startDate), endDate: utcDayToLocal(e.endDate || e.startDate + 86400000) } : e)).map((e) => ({
+      ? { ...e, rawStart: e.startDate, startDate: utcDayToLocal(e.startDate), endDate: utcDayToLocal(e.endDate || e.startDate + 86400000) } : e)).map((e) => ({
       source: 'device', id: String(e.id), calendarId: e.calendarId ? String(e.calendarId) : null,
-      key: e.isPartOfSeries ? `cal:${e.id}@${e.startDate}` : `cal:${e.id}`,
+      key: e.isPartOfSeries ? `cal:${e.id}@${e.startDate}` : `cal:${e.id}`, rawStart: e.rawStart ?? e.startDate,
       title: e.title || '', start: e.startDate, end: e.endDate || e.startDate + 3600000, allDay: !!e.isAllDay,
       location: e.location || '', description: e.description || '', color: e.color || null, recurring: !!e.isPartOfSeries,
       attendees: (e.attendees || []).map((a) => ({ name: a.name || '', email: a.email || '' })).filter((a) => a.name || a.email),
     }));
-  } catch (e) { console.warn('listEvents', e); return []; }
+  } catch (e) { console.warn('listEvents', e); return null; }
 }
 
 export async function createDeviceEvent(ev, calendarId, leadMin, recurrence = null) {
   const { id } = await CapacitorCalendar.createEvent({
-    title: ev.title, startDate: ev.start, endDate: ev.end, isAllDay: !!ev.allDay, location: ev.location || undefined,
+    title: ev.title, startDate: ev.start, endDate: ev.allDay ? ev.end - 60000 : ev.end, isAllDay: !!ev.allDay, location: ev.location || undefined,
     description: ev.description || undefined, calendarId: calendarId || undefined, alerts: leadMin ? [-leadMin] : undefined,
     recurrence: recurrence || undefined,
   });
@@ -105,7 +105,7 @@ export async function createDeviceEvent(ev, calendarId, leadMin, recurrence = nu
 
 export async function modifyDeviceEvent(ev, recurrence = null) {
   await CapacitorCalendar.modifyEvent({
-    id: ev.id, title: ev.title, startDate: ev.start, endDate: ev.end, isAllDay: !!ev.allDay, location: ev.location || '',
+    id: ev.id, title: ev.title, startDate: ev.start, endDate: ev.allDay ? ev.end - 60000 : ev.end, isAllDay: !!ev.allDay, location: ev.location || '',
     recurrence: recurrence || undefined,
   });
 }
@@ -334,4 +334,16 @@ export async function contactBirthdays(request = false) {
     .filter((c) => c.birthday?.day && c.birthday?.month)
     .map((c) => ({ name: contactName(c), day: c.birthday.day, month: c.birthday.month, year: c.birthday.year || null }))
     .filter((b) => b.name);
+}
+
+// ——— Modification interne des rendez-vous répétitifs et couleurs (Android) ———
+export async function modifyOccurrence(ev, instanceDate, color) {
+  return TrameWidget.modifyOccurrence({ id: ev.id, instanceDate, title: ev.title, start: ev.start, end: ev.end, allDay: !!ev.allDay, location: ev.location || '', color: color ?? undefined });
+}
+export async function modifySeries(id, { title, location, shift, duration, allDay, rrule, color, single = false }) {
+  return TrameWidget.modifySeries({ id, title, location: location || '', shift, duration, allDay: !!allDay, rrule: rrule || undefined, color: color ?? undefined, single });
+}
+export async function setEventColor(id, color) {
+  if (platform !== 'android') return;
+  try { await TrameWidget.setEventColor({ id, color: color || '' }); } catch (e) { console.warn('color', e); }
 }

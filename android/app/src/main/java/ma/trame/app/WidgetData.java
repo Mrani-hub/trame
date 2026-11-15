@@ -43,6 +43,7 @@ final class WidgetData {
     boolean arabDigits = false;
     Set<String> hidden = new HashSet<>();
     JSONArray localEvents = new JSONArray(), tasks = new JSONArray();
+    JSONObject colors = new JSONObject();
 
     static WidgetData load(Context c) {
         WidgetData d = new WidgetData();
@@ -64,6 +65,7 @@ final class WidgetData {
                 if (h != null) for (int i = 0; i < h.length(); i++) d.hidden.add(h.optString(i));
                 if (j.optJSONArray("localEvents") != null) d.localEvents = j.optJSONArray("localEvents");
                 if (j.optJSONArray("tasks") != null) d.tasks = j.optJSONArray("tasks");
+                if (j.optJSONObject("colors") != null) d.colors = j.optJSONObject("colors");
             } else {
                 d.lang = Locale.getDefault().getLanguage().equals("ar") ? "ar" : "fr";
             }
@@ -165,7 +167,7 @@ final class WidgetData {
                     if (!inDay) continue;
                     Item it = new Item();
                     it.type = 1; it.id = String.valueOf(cur.getLong(0)); it.title = (bday ? "🎂 " : "") + nz(cur.getString(1)); it.start = s; it.end = e;
-                    it.allDay = allDay; it.info = nz(cur.getString(6)); it.color = cur.getInt(7);
+                    it.allDay = allDay; it.info = nz(cur.getString(6)); it.color = parseColor(colors.optString(it.id, ""), cur.getInt(7));
                     events.add(it);
                 }
             } catch (Exception ignored) { }
@@ -179,7 +181,7 @@ final class WidgetData {
             if (lAllDay ? !(s < end && e > day) : !(s >= day && s < end)) continue;
             Item it = new Item();
             it.type = 1; it.local = true; it.id = o.optString("id"); it.title = o.optString("title"); it.start = s; it.end = e;
-            it.allDay = o.optBoolean("allDay"); it.info = o.optString("location"); it.color = 0xFF0F766E;
+            it.allDay = o.optBoolean("allDay"); it.info = o.optString("location"); it.color = parseColor(o.optString("color", ""), 0xFF0F766E);
             events.add(it);
         }
         Collections.sort(events, (a, b2) -> a.allDay != b2.allDay ? (a.allDay ? -1 : 1) : Long.compare(a.start, b2.start));
@@ -242,6 +244,10 @@ final class WidgetData {
             }
         } catch (Exception ignored) { }
         return out;
+    }
+
+    static int parseColor(String hex, int fallback) {
+        try { return hex == null || hex.isEmpty() ? fallback : android.graphics.Color.parseColor(hex); } catch (Exception e) { return fallback; }
     }
 
     private static String nz(String s) { return s == null ? "" : s; }

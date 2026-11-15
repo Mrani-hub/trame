@@ -1,5 +1,5 @@
 {
-  "version": "0.3.2",
+  "version": "0.4.0",
   "apk": "https://github.com/Mrani-hub/trame/releases/latest/download/Trame.apk",
-  "notes": "Widget toujours en mode sombre. Calendrier mensuel : double appui sur un jour pour y ajouter un rendez-vous."
+  "notes": "Événements sur une période (ex. formation de 2 semaines, jours ouvrables), réglage des anniversaires (rappel, affichage ou masquage), et un rendez-vous n'apparaît plus que le jour où il commence."
 }

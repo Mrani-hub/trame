@@ -204,3 +204,4 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; }
 .brand small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hint.center { text-align: center; margin: 8px 0 0; font-size: 13px; }
 .cell { touch-action: manipulation; }
+.period-box { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 10px; }

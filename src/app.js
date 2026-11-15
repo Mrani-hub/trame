@@ -19,10 +19,10 @@ import { occurrences, nextAfter, toNativeRule, ruleLabel, presets, presetIdOf, g
 const DEFAULT_SETTINGS = {
   lang: 'fr', theme: 'auto', calMode: 'both', hijriOffset: 0, digits: 'latin', writeCal: '', hiddenCals: [],
   contextLead: 15, defaultDur: 60, dayStart: 8, dayEnd: 18, taskDueReminder: true, onboarded: false,
-  updateUrl: 'https://raw.githubusercontent.com/Mrani-hub/trame/main/version.json', voiceLang: 'auto', lastUpdateCheck: 0,
+  updateUrl: 'https://raw.githubusercontent.com/Mrani-hub/trame/main/version.json', voiceLang: 'auto', lastUpdateCheck: 0, birthdays: 'remind',
 };
 const state = {
-  data: { format: 1, tasks: [], notes: [], localEvents: [], eventMeta: {}, contacts: {}, series: {}, settings: { ...DEFAULT_SETTINGS } },
+  data: { format: 1, tasks: [], notes: [], localEvents: [], eventMeta: {}, contacts: {}, series: {}, birthdays: [], settings: { ...DEFAULT_SETTINGS } },
   view: 'today', cursor: startOfDay(new Date()), agendaMode: 'week', monthCal: null, selDay: startOfDay(new Date()),
   taskFilter: 'open', query: '', update: null, appVersion: '', listening: false, events: [], range: null, calendars: [], calPerm: false, sheet: null,
 };
@@ -85,8 +85,11 @@ async function ensureRange(from, to, force = false) {
   const device = state.calPerm ? await P.listDeviceEvents(f, tt) : [];
   const hidden = new Set(S().hiddenCals);
   const locals = expandLocal(f, tt);
-  state.events = [...device.filter((e) => !hidden.has(e.calendarId)), ...locals]
-    .map((e) => { const m = metaOf(e); return { ...e, participants: m.participants || [], rule: e.repeat || m.rule || state.data.series[m.series]?.rule || null, seriesId: m.series || null }; })
+  const bdCals = new Set(state.calendars.filter((c) => c.birthday).map((c) => c.id));
+  const dev = device.filter((e) => !hidden.has(e.calendarId)).map((e) => (bdCals.has(e.calendarId) ? { ...e, birthday: true, allDay: true } : e));
+  const bdShown = S().birthdays !== 'hide';
+  state.events = [...dev.filter((e) => bdShown || !e.birthday), ...(bdShown ? contactBirthdayEvents(f, tt, dev.filter((e) => e.birthday)) : []), ...locals]
+    .map((e) => { const m = metaOf(e); return { ...e, participants: m.participants || [], rule: e.repeat || m.rule || state.data.series[m.series]?.rule || null, seriesId: m.series || null, period: !!(e.period || m.period), periodStart: m.start || null }; })
     .sort((a, b) => a.start - b.start);
   state.range = [f, tt];
 }
@@ -94,6 +97,25 @@ async function ensureRange(from, to, force = false) {
 function metaOf(e) {
   const M = state.data.eventMeta;
   return M[e.key] || M[e.source === 'local' ? `loc:${e.id}` : `cal:${e.id}`] || {};
+}
+/** Anniversaires issus des contacts (sauf ceux déjà présents dans un agenda d'anniversaires). */
+function contactBirthdayEvents(from, to, existing) {
+  const out = [];
+  const known = existing.map((e) => `${ymd(e.start)}|${norm(e.title)}`);
+  const y0 = new Date(from).getFullYear(), y1 = new Date(to).getFullYear();
+  for (const b of state.data.birthdays || []) {
+    for (let y = y0; y <= y1; y++) {
+      const d = new Date(y, b.month - 1, b.day);
+      if (d.getMonth() !== b.month - 1) continue; // 29 février
+      const st = d.getTime();
+      if (st < from - DAY || st >= to) continue;
+      if (known.some((k) => k.startsWith(ymd(st) + '|') && k.includes(norm(b.name).split(' ')[0]))) continue;
+      const age = b.year ? y - b.year : null;
+      out.push({ source: 'birthday', birthday: true, id: `bd:${norm(b.name)}`, key: `bd:${norm(b.name)}@${st}`, title: `🎂 ${b.name}${age && age > 0 ? ` (${age})` : ''}`,
+        start: st, end: st + DAY, allDay: true, person: b.name, attendees: [], location: '' });
+    }
+  }
+  return out;
 }
 /** Rendez-vous locaux (agenda Trame), occurrences répétitives développées sur [from, to[. */
 function expandLocal(from, to) {
@@ -107,9 +129,11 @@ function expandLocal(from, to) {
   }
   return out;
 }
+/** Rendez-vous d'un jour : un rendez-vous horaire n'apparaît que le jour où il commence ;
+ *  un rendez-vous « toute la journée » sur plusieurs jours apparaît chaque jour couvert. */
 const eventsOn = (day) => {
   const a = startOfDay(day).getTime(), b = a + DAY;
-  return state.events.filter((e) => e.start < b && e.end > a);
+  return state.events.filter((e) => (e.allDay ? e.start < b && e.end > a : e.start >= a && e.start < b));
 };
 const invalidate = () => { state.range = null; };
 
@@ -202,8 +226,8 @@ function eventRow(e, conf = new Set()) {
   const ctx = buildContext(e, state.data);
   const n = ctx.related.length + ctx.openTasks.length;
   return `<button class="row ev" data-act="event" data-key="${esc(e.key)}" style="--c:${esc(e.color || '#1F4E79')}">
-    <div class="when">${e.allDay ? t('allDayShort') : `${D(fmtTime(e.start))}<small>${D(fmtTime(e.end))}</small>`}</div>
-    <div class="what"><b>${esc(e.title || t('untitled'))}${e.recurring || e.rule || e.seriesId ? ` <span class="rep">${icon('repeat')}</span>` : ''}</b>${e.location ? `<small>${esc(e.location)}</small>` : ''}</div>
+    <div class="when">${e.allDay ? t('allDayShort') : `${D(fmtTime(e.start))}<small>${D(fmtTime(e.end))}${sameDay(e.start, e.end) ? '' : ` <sup>+${Math.round((startOfDay(e.end) - startOfDay(e.start)) / DAY)}</sup>`}</small>`}</div>
+    <div class="what"><b>${esc(e.title || t('untitled'))}${!e.period && (e.recurring || e.rule || e.seriesId) ? ` <span class="rep">${icon('repeat')}</span>` : ''}</b>${(() => { const p = e.period && periodInfo(e); const sub = [p ? D(t('dayOf', p.i, p.n)) : '', e.location || ''].filter(Boolean).join(' · '); return sub ? `<small>${esc(sub)}</small>` : ''; })()}</div>
     ${conf.has(e.key) ? `<span class="badge warn">${icon('warn')}</span>` : ''}${n ? `<span class="badge">${icon('link')}${D(n)}</span>` : ''}
   </button>`;
 }
@@ -380,6 +404,7 @@ function draftFromParse(r) {
   if (d.type === 'event' && !d.time && !d.allDay && d.date) d.allDay = true;
   if (d.type === 'event' && d.time && !d.endTime) d.endTime = hm(new Date(r.start + (r.durationMin || s.defaultDur) * MIN));
   if (d.type === 'note') { d.body = r.title; d.title = ''; }
+  if (r.periodEnd) { d.type = 'event'; d.multi = true; d.endDate = ymd(r.periodEnd); d.workdays = !!r.workdays; }
   return d;
 }
 function sheetEdit() {
@@ -408,6 +433,12 @@ function sheetEdit() {
       </div>` : ''}
     ${d.type === 'event' ? `
       <label class="check"><input type="checkbox" name="allDay" ${d.allDay ? 'checked' : ''}> ${t('allDay')}</label>
+      <label class="check"><input type="checkbox" name="multi" ${d.multi ? 'checked' : ''}> ${t('multiDay')}</label>
+      ${d.multi ? `<div class="period-box">
+        <label>${t('periodEnd')}<input type="date" name="endDate" value="${d.endDate || d.date}" min="${d.date}"></label>
+        <label class="check"><input type="checkbox" name="workdays" ${d.workdays ? 'checked' : ''}> ${t('workdaysOnly')}</label>
+        <p class="replabel" id="periodLbl"></p>
+      </div>` : ''}
       <div class="two times ${d.allDay ? 'hidden' : ''}">
         <label>${t('start')}<input type="time" name="time" value="${d.time}"></label>
         <label>${t('end')}<input type="time" name="endTime" value="${d.endTime}"></label>
@@ -425,7 +456,7 @@ function sheetEdit() {
       </div>
       <div class="two"><label>${t('remindAt')}<input type="date" name="remindDate" value="${d.remindAt ? ymd(d.remindAt) : ''}"></label>
       <label>&nbsp;<input type="time" name="remindTime" value="${d.remindAt ? hm(d.remindAt) : ''}"></label></div>` : ''}
-    ${d.type !== 'note' ? repeatBlock(d) : ''}
+    ${d.type !== 'note' && !(d.type === 'event' && d.multi) ? repeatBlock(d) : ''}
     ${d.warnings?.includes('defaultTime') ? `<p class="warnline">${icon('warn')} ${t('defaultTimeWarn')}</p>` : ''}
     <div class="actions">
       ${d.existing ? `<button type="button" class="btn danger ghost" data-act="edel">${t('del')}</button>` : ''}
@@ -434,6 +465,22 @@ function sheetEdit() {
       <button class="btn primary">${t('save')}</button>
     </div>
   </form>`;
+}
+/** Règle d'une période : chaque jour (ou chaque jour ouvrable) jusqu'à la date de fin ; null = un seul bloc « toute la journée ». */
+function periodRule(d) {
+  if (!d.multi || !d.endDate || d.endDate < d.date) return null;
+  const until = parseYmd(d.endDate).getTime();
+  if (d.allDay && !d.workdays) return null;
+  return d.workdays ? { freq: 'weekly', byDay: [1, 2, 3, 4, 5], until } : { freq: 'daily', until };
+}
+/** Position dans une période : « jour 3 / 10 ». */
+function periodInfo(e) {
+  if (!e.period || !e.rule) return null;
+  const st = e.seriesStart || e.periodStart || e.start;
+  const all = occurrences(e.rule, st, st, Infinity, { max: 2000, hijriOffset: S().hijriOffset });
+  if (!all.length) return null;
+  const i = all.findIndex((x) => sameDay(x, e.start));
+  return { i: i + 1, n: all.length, from: all[0], to: all[all.length - 1] };
 }
 const refStart = (d) => (d.date ? combine(d.date, d.time || '09:00') : startOfDay(new Date()).getTime() + 9 * 3600000);
 function repeatBlock(d) {
@@ -464,6 +511,9 @@ function readEditForm() {
   for (const k of ['title', 'body', 'date', 'time', 'endTime', 'location', 'calendarId', 'priority', 'assignee']) if (f.elements[k]) d[k] = v(k).trim();
   if (f.elements.durationMin) d.durationMin = +v('durationMin');
   if (f.elements.allDay) d.allDay = f.elements.allDay.checked;
+  if (f.elements.multi) d.multi = f.elements.multi.checked;
+  if (f.elements.endDate) d.endDate = v('endDate');
+  if (f.elements.workdays) d.workdays = f.elements.workdays.checked;
   if (f.elements.participants) d.participants = v('participants').split(/[,،]/).map((s) => s.trim()).filter(Boolean);
   if (f.elements.remindDate) d.remindAt = v('remindDate') ? combine(v('remindDate'), v('remindTime') || '09:00') : null;
   if (f.elements.repeatPreset) {
@@ -492,6 +542,14 @@ async function updateEditDerived() {
   const lbl = $('#hijriLbl');
   if (lbl) lbl.textContent = d.date ? D(dateLabel(parseYmd(d.date), { ...S(), calMode: S().calMode === 'greg' ? 'both' : S().calMode }, { year: true })) : t('noDue');
   const times = $('.times', f); if (times) times.classList.toggle('hidden', !!d.allDay);
+  const pl = $('#periodLbl');
+  if (pl && d.date && d.endDate) {
+    const r = periodRule(d);
+    const n = r ? occurrences(r, combine(d.date, d.time || '09:00'), 0, Infinity, { max: 2000 }).length
+      : Math.round((parseYmd(d.endDate) - parseYmd(d.date)) / DAY) + 1;
+    const g = (x) => dateLabel(parseYmd(x), { ...S(), calMode: 'greg' }, { weekday: false });
+    pl.textContent = D(t('periodSummary', Math.max(0, n), g(d.date), g(d.endDate), d.workdays));
+  }
   const rl = $('#repLbl'); if (rl && d.repeat) rl.textContent = D(ruleLabel(d.repeat, refStart(d), S().lang, S().hijriOffset));
   const box = $('#conflictBox');
   if (box && d.type === 'event' && d.date && d.time && !d.allDay) {
@@ -499,7 +557,7 @@ async function updateEditDerived() {
     let end = d.endTime ? combine(d.date, d.endTime) : start + S().defaultDur * MIN;
     if (end <= start) end = start + S().defaultDur * MIN;
     await ensureRange(startOfDay(start).getTime(), endOfDay(start).getTime());
-    const c = findConflicts({ start, end }, eventsOn(new Date(start)), d.existing?.key);
+    const c = findConflicts({ start, end }, state.events, d.existing?.key);
     box.innerHTML = c.length ? `<div class="conflict">${icon('warn')}<div><b>${t('conflictWarn')}</b>${c.map((e) => `<small>${D(fmtTime(e.start))}–${D(fmtTime(e.end))} · ${esc(e.title)}</small>`).join('')}</div></div>` : '';
   } else if (box) box.innerHTML = '';
 }
@@ -512,10 +570,12 @@ async function saveEdit() {
   if (d.type === 'event') {
     if (!d.date) return;
     const start = d.allDay ? parseYmd(d.date).getTime() : combine(d.date, d.time || '09:00');
-    let end = d.allDay ? addDays(parseYmd(d.date), 1).getTime() : d.endTime ? combine(d.date, d.endTime) : start + s.defaultDur * MIN;
+    const pRule = periodRule(d);
+    const spanAllDay = d.multi && d.allDay && !d.workdays && d.endDate > d.date; // un seul bloc sur plusieurs jours
+    let end = d.allDay ? addDays(parseYmd(spanAllDay ? d.endDate : d.date), 1).getTime() : d.endTime ? combine(d.date, d.endTime) : start + s.defaultDur * MIN;
     if (end <= start) end = start + s.defaultDur * MIN;
     const ev = { title: d.title, start, end, allDay: d.allDay, location: d.location };
-    const rule = d.repeat ? normalizeRule(d.repeat, start) : null;
+    const rule = pRule ? normalizeRule(pRule, start) : d.multi ? null : d.repeat ? normalizeRule(d.repeat, start) : null;
     let key, metaKeys = [];
     try {
       if (d.existing?.source === 'device') {
@@ -543,6 +603,11 @@ async function saveEdit() {
         state.data.localEvents.push({ id, key, ...ev, repeat: rule, created: now });
       }
     } catch (e) { console.error(e); toast(String(e.message || e)); return; }
+    if (pRule) {
+      const lb = state.data.localEvents.find((e) => e.key === key || `loc:${e.id}` === key);
+      if (lb) lb.period = true;
+      else state.data.eventMeta[key] = { ...(state.data.eventMeta[key] || {}), period: true, start, rule };
+    }
     for (const k of metaKeys.length ? metaKeys : [key]) {
       if (d.participants?.length) state.data.eventMeta[k] = { ...(state.data.eventMeta[k] || {}), participants: d.participants };
     }
@@ -657,6 +722,9 @@ function openEventEditor(e) {
     type: 'event', title: e.title, date: ymd(e.start), time: e.allDay ? '' : hm(e.start), endTime: e.allDay ? '' : hm(e.end), allDay: e.allDay,
     location: e.location || '', participants: e.participants || [], calendarId: e.source === 'local' ? 'local' : e.calendarId,
     repeat: e.source === 'local' ? (state.data.localEvents.find((x) => x.id === e.id)?.repeat || null) : e.rule || null,
+    multi: !!e.period || (e.allDay && e.end - e.start > DAY + 3600000),
+    endDate: e.period && e.rule?.until ? ymd(e.rule.until) : e.allDay && e.end - e.start > DAY + 3600000 ? ymd(e.end - DAY) : '',
+    workdays: !!(e.period && e.rule?.freq === 'weekly'),
     existing: { kind: 'event', source: e.source, id: e.id, key: e.key, recurring: e.recurring, start: e.start },
   } });
 }
@@ -665,14 +733,15 @@ function openEventEditor(e) {
 function sheetEvent() {
   const e = state.sheet.ev;
   const ctx = buildContext(e, state.data);
-  const conf = findConflicts(e, eventsOn(new Date(e.start)), e.key);
+  const conf = findConflicts(e, state.events, e.key);
   const why = { linked: 'whyLinked', series: 'whySeries', people: 'whyPeople', topic: 'whyTopic' };
   const cal = state.calendars.find((c) => c.id === e.calendarId);
   const people = [...(e.attendees || []).map((a) => a.name || a.email), ...(e.participants || [])];
   return `<div class="sheet-head"><b>${esc(e.title || t('untitled'))}</b><button class="iconbtn" data-act="close" aria-label="${t('close')}">✕</button></div>
     <p class="meta">${D(esc(fmtDate(e.start, { year: true })))}<br>${e.allDay ? t('allDay') : `${D(fmtTime(e.start))} – ${D(fmtTime(e.end))}`}
       ${e.location ? `<br>${esc(e.location)}` : ''}<br><small>${esc(e.source === 'local' ? t('localCal') : cal?.title || '')}</small></p>
-    ${e.rule || e.recurring ? `<p class="replabel">${icon('repeat')} ${esc(e.rule ? D(ruleLabel(e.rule, e.seriesStart || state.data.series[e.seriesId]?.start || e.start, S().lang, S().hijriOffset)) : t('repeating'))}</p>` : ''}
+    ${e.period && periodInfo(e) ? (() => { const p = periodInfo(e); return `<p class="replabel">${icon('agenda')} ${esc(D(t('periodDay', p.i, p.n, dateLabel(new Date(p.from), { ...S(), calMode: 'greg' }, { weekday: false }), dateLabel(new Date(p.to), { ...S(), calMode: 'greg' }, { weekday: false }))))}</p>`; })() : ''}
+    ${!e.period && (e.rule || e.recurring) ? `<p class="replabel">${icon('repeat')} ${esc(e.rule ? D(ruleLabel(e.rule, e.seriesStart || state.data.series[e.seriesId]?.start || e.start, S().lang, S().hijriOffset)) : t('repeating'))}</p>` : ''}
     ${people.length ? `<p class="meta">${icon('users')} ${esc(people.join(', '))}</p>` : ''}
     ${conf.length ? `<div class="conflict">${icon('warn')}<div><b>${t('conflictWarn')}</b>${conf.map((c) => `<small>${D(fmtTime(c.start))}–${D(fmtTime(c.end))} · ${esc(c.title)}</small>`).join('')}</div></div>` : ''}
     <h3 class="ctx-title">${icon('link')} ${t('context')}</h3>
@@ -682,10 +751,10 @@ function sheetEvent() {
     ${ctx.related.length ? `<div class="ctx-box"><b>${t('relatedNotes')}</b>${ctx.related.map((r) => `<button class="row" data-act="note" data-id="${r.note.id}">
       <div class="what"><b>${esc(r.note.title || t('untitled'))}</b><small>${r.why.map((w) => t(why[w])).join(' · ')} · ${D(fmtDate(r.note.updated, { weekday: false }))}</small></div></button>`).join('')}</div>` : ''}
     <div class="actions wrap">
-      <button class="btn primary" data-act="evnote">${icon('users')} ${t('newMeeting')}</button>
+      ${e.birthday ? '' : `<button class="btn primary" data-act="evnote">${icon('users')} ${t('newMeeting')}</button>`}
       <button class="btn wa" data-act="evwa">${icon('wa')} WhatsApp</button>
       <button class="btn ghost" data-act="evics">${icon('share')} ${t('shareIcs')}</button>
-      <button class="btn ghost" data-act="evedit">${t('edit')}</button>
+      ${e.source === 'birthday' ? '' : `<button class="btn ghost" data-act="evedit">${t('edit')}</button>`}
     </div>`;
 }
 async function openEventByKey(key, hintStart) {
@@ -816,6 +885,10 @@ function sheetSettings() {
     <div class="two"><label>${t('sDayHours')}<select data-set="dayStart" data-num="1">${[6, 7, 8, 9, 10].map((h) => opt(h, s.dayStart, D(h + ':00'))).join('')}</select></label>
       <label>&nbsp;<select data-set="dayEnd" data-num="1">${[15, 16, 17, 18, 19, 20].map((h) => opt(h, s.dayEnd, D(h + ':00'))).join('')}</select></label></div>
     ${P.platform === 'android' ? `<p class="hint">${t('widgetHint')}</p>` : ''}
+    <h3>🎂 ${t('sBirthdays')}</h3>
+    <label>${t('sBirthdaysMode')}<select data-set="birthdays">${opt('remind', s.birthdays, t('bdRemind'))}${opt('show', s.birthdays, t('bdShow'))}${opt('hide', s.birthdays, t('bdHide'))}</select></label>
+    ${P.native ? `<div class="actions wrap"><button class="btn ghost" data-act="bdimport">${icon('contacts')} ${t('bdImport')}</button><small>${state.data.birthdays?.length ? D(t('bdCount', state.data.birthdays.length)) : ''}</small></div>` : ''}
+    <p class="hint">${t('bdHint')}</p>
     <h3>${t('sNotif')}</h3>
     <label>${t('sLead')}<select data-set="contextLead" data-num="1">${opt(0, s.contextLead, t('off'))}${[5, 10, 15, 30, 60].map((m) => opt(m, s.contextLead, D(t('minutesBefore', m)))).join('')}</select></label>
     <label class="check"><input type="checkbox" data-set="taskDueReminder" ${s.taskDueReminder ? 'checked' : ''}> ${t('sTaskReminder')}</label>
@@ -837,6 +910,7 @@ async function applySetting(el) {
   if (k === 'hijriOffset' || k === 'calMode') state.monthCal = null;
   persist();
   if (k === 'theme') applyTheme();
+  if (k === 'birthdays') { invalidate(); pushWidget(); }
   if (k === 'lang' || k === 'calMode' || k === 'hijriOffset' || k === 'digits') { setLang(S().lang); renderSheet(); }
   render();
 }
@@ -966,9 +1040,10 @@ function pushWidget() {
   if (P.platform !== 'android') return;
   const s = S(), from = startOfDay(new Date()).getTime() - 7 * DAY;
   P.updateWidget({
-    v: 1, lang: s.lang, calMode: s.calMode, hijriOffset: s.hijriOffset, digits: s.digits, hiddenCals: s.hiddenCals,
+    v: 1, lang: s.lang, calMode: s.calMode, hijriOffset: s.hijriOffset, digits: s.digits,
+    hiddenCals: s.birthdays === 'hide' ? [...s.hiddenCals, ...state.calendars.filter((c) => c.birthday).map((c) => c.id)] : s.hiddenCals,
     calPerm: state.calPerm,
-    localEvents: expandLocal(from, from + 130 * DAY).map((e) => ({ id: e.id, title: e.title, start: e.start, end: e.end, allDay: !!e.allDay, location: e.location || '' })),
+    localEvents: [...expandLocal(from, from + 130 * DAY), ...(s.birthdays === 'hide' ? [] : contactBirthdayEvents(from, from + 130 * DAY, []))].map((e) => ({ id: e.id, title: e.title, start: e.start, end: e.end, allDay: !!e.allDay, location: e.location || '' })),
     tasks: state.data.tasks.filter((x) => !x.done && (x.due || x.remindAt || x.plannedStart)).map((x) => ({
       id: x.id, title: x.title, high: x.priority === 'high', reminder: !!x.isReminder,
       due: x.due || null, remindAt: x.remindAt || null, plannedStart: x.plannedStart || null, durationMin: x.durationMin || null,
@@ -1008,11 +1083,23 @@ async function rescheduleNotifs() {
     const evs = [...device.filter((e) => !s.hiddenCals.includes(e.calendarId)), ...expandLocal(from, to).filter((e) => e.start > from)];
     for (const e of evs) {
       if (e.allDay) continue;
+      if (e.birthday) continue;
       const ctx = buildContext({ ...e, participants: metaOf(e).participants || [] }, state.data);
       items.push({
         ref: 'e:' + e.key, at: e.start - s.contextLead * MIN, title: `${t('notifEvent', s.contextLead)} · ${e.title}`,
         body: t('notifCtx', ctx.related.length, ctx.openTasks.length), extra: { kind: 'event', key: e.key, start: e.start },
       });
+    }
+  }
+  if (s.birthdays === 'remind') {
+    const from = startOfDay(new Date()).getTime(), to = from + 8 * DAY;
+    const device = state.calPerm ? await P.listDeviceEvents(from, to) : [];
+    const bdCals = new Set(state.calendars.filter((c) => c.birthday).map((c) => c.id));
+    const bds = device.filter((e) => bdCals.has(e.calendarId) && !s.hiddenCals.includes(e.calendarId));
+    const all = [...bds.map((e) => ({ ...e, birthday: true })), ...contactBirthdayEvents(from, to, bds)];
+    for (const e of all) {
+      const day = startOfDay(e.start).getTime();
+      items.push({ ref: 'b:' + e.key, at: day + 9 * 3600000, title: e.title.startsWith('🎂') ? e.title : `🎂 ${e.title}`, body: t('bdNotif'), extra: { kind: 'event', key: e.key, start: e.start } });
     }
   }
   await P.scheduleAll(items);
@@ -1041,6 +1128,11 @@ function capture(blank = false) {
 
 const actions = {
   add: () => capture(),
+  bdimport: async () => {
+    const list = await P.contactBirthdays(true);
+    if (!list) { toast(t('contactsDenied')); return; }
+    state.data.birthdays = list; invalidate(); persist(); renderSheet(); render(); toast(D(t('bdCount', list.length)));
+  },
   theme: () => { S().theme = isDark() ? 'light' : 'dark'; applyTheme(); persist(); render(); },
   view: (b) => { state.view = b.dataset.v; if (state.view === 'agenda') state.cursor = startOfDay(new Date()); render(); window.scrollTo(0, 0); },
   settings: () => openSheet({ kind: 'settings' }),
@@ -1184,7 +1276,11 @@ const actions = {
   },
   install: () => { if (state.update?.url) { P.openUrl(state.update.url); toast(t('installHint')); } },
   voice: () => startVoice(),
-  evwa: () => openWhatsApp(eventMessage(state.sheet.ev), whoOf(state.sheet.ev)),
+  evwa: () => {
+    const e = state.sheet.ev;
+    if (e.birthday) { const who = e.person || e.title.replace(/^🎂\s*/, '').replace(/\s*\(\d+\)$/, ''); openWhatsApp(t('bdWish', who.split(' ')[0]), [who]); return; }
+    openWhatsApp(eventMessage(e), whoOf(e));
+  },
   taskwa: () => { const x = state.data.tasks.find((k) => k.id === state.sheet.draft.existing.id); if (x) openWhatsApp(taskMessage(x), x.assignee ? [x.assignee] : []); },
   wasend: () => sendWhatsApp(),
   wapick: (b) => {
@@ -1211,7 +1307,7 @@ const actions = {
 };
 
 function normalizeData(d) {
-  const out = { format: 1, tasks: [], notes: [], localEvents: [], eventMeta: {}, contacts: {}, series: {}, ...(d || {}) };
+  const out = { format: 1, tasks: [], notes: [], localEvents: [], eventMeta: {}, contacts: {}, series: {}, birthdays: [], ...(d || {}) };
   out.settings = { ...DEFAULT_SETTINGS, ...(d?.settings || {}) };
   return out;
 }
@@ -1239,7 +1335,7 @@ function bind() {
   });
   document.addEventListener('change', (ev) => {
     const el = ev.target;
-    if (el.closest('#editForm') && ['repeatPreset', 'repFreq', 'repEnd', 'date'].includes(el.name)) {
+    if (el.closest('#editForm') && ['repeatPreset', 'repFreq', 'repEnd', 'date', 'multi', 'allDay'].includes(el.name)) {
       readEditForm();
       if (el.name !== 'date' || state.sheet.draft.repPreset !== 'custom') { renderSheet(); return; }
     }
@@ -1287,6 +1383,7 @@ async function init() {
   pushWidget();
   handleLaunch();
   state.appVersion = await P.appVersion();
+  if (P.native && state.data.birthdays?.length) P.contactBirthdays(false).then((l) => { if (l) { state.data.birthdays = l; invalidate(); P.saveData(state.data); } });
   checkForUpdate().then((u) => { if (u?.available) render(); });
 }
 

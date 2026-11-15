@@ -60,6 +60,9 @@ export async function calendarPermission(request = false) {
   } catch (e) { console.warn('calendar permission', e); return false; }
 }
 
+/** Agendas d'anniversaires (Google « Anniversaires / Birthdays / Contacts », Samsung, iPhone…). */
+const BIRTHDAY_CAL = /birthday|anniversaire|cumpleaños|geburtstag|عيد ميلاد|أعياد الميلاد|#contacts@group|^contacts$/i;
+
 export async function listCalendars() {
   if (!native) return [];
   try {
@@ -67,6 +70,7 @@ export async function listCalendars() {
     return (result || []).map((c) => ({
       id: String(c.id), title: c.title || c.internalTitle || c.accountName || '—', color: c.color || '#1F4E79',
       account: c.accountName || c.source?.title || '', writable: c.allowsContentModifications !== false && !c.isImmutable,
+      birthday: BIRTHDAY_CAL.test(`${c.title || ''} ${c.internalTitle || ''} ${c.accountName || ''}`),
     }));
   } catch (e) { console.warn('listCalendars', e); return []; }
 }
@@ -76,7 +80,11 @@ export async function listDeviceEvents(from, to) {
   if (!native) return [];
   try {
     const { result } = await CapacitorCalendar.listEventsInRange({ from, to });
-    return (result || []).map((e) => ({
+    // Android stocke les journées entières en UTC (minuit UTC) : on les ramène au minuit local
+    const utcDayToLocal = (t) => { const d = new Date(t); return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()).getTime(); };
+    const isUtcMidnight = (t) => { const d = new Date(t); return d.getUTCHours() === 0 && d.getUTCMinutes() === 0; };
+    return (result || []).map((e) => (e.isAllDay && isUtcMidnight(e.startDate)
+      ? { ...e, startDate: utcDayToLocal(e.startDate), endDate: utcDayToLocal(e.endDate || e.startDate + 86400000) } : e)).map((e) => ({
       source: 'device', id: String(e.id), calendarId: e.calendarId ? String(e.calendarId) : null,
       key: e.isPartOfSeries ? `cal:${e.id}@${e.startDate}` : `cal:${e.id}`,
       title: e.title || '', start: e.startDate, end: e.endDate || e.startDate + 3600000, allDay: !!e.isAllDay,
@@ -311,4 +319,14 @@ export async function allContacts(request = false) {
   const r = await Contacts.getContacts({ projection: { name: true, phones: true } });
   contactCache = (r.contacts || []).map((c) => ({ name: contactName(c), phones: contactPhones(c) })).filter((c) => c.name && c.phones.length);
   return contactCache;
+}
+
+/** Anniversaires des contacts du téléphone : [{ name, day, month (1-12), year|null }]. */
+export async function contactBirthdays(request = false) {
+  if (!(await contactsPermission(request))) return null;
+  const r = await Contacts.getContacts({ projection: { name: true, birthday: true } });
+  return (r.contacts || [])
+    .filter((c) => c.birthday?.day && c.birthday?.month)
+    .map((c) => ({ name: contactName(c), day: c.birthday.day, month: c.birthday.month, year: c.birthday.year || null }))
+    .filter((b) => b.name);
 }

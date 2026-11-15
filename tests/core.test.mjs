@@ -154,3 +154,21 @@ test('Numéros WhatsApp', () => {
   assert.equal(waNumber('0033 6 12 34 56 78'), '33612345678');
   assert.equal(waNumber(''), '');
 });
+
+test('Périodes : du … au …, pendant N semaines, jours ouvrables', () => {
+  const now = new Date(2026, 10, 15, 12);
+  const ymdOf = (d) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  let r = parseQuick('Formation sécurité 23/11 pendant 2 semaines jours ouvrables 8h30-16h30', now);
+  assert.equal(r.type, 'event'); assert.equal(r.title, 'Formation sécurité'); assert.equal(r.workdays, true);
+  assert.equal(ymdOf(r.periodEnd), '2026-12-6'); assert.equal(r.start, at(2026, 11, 23, 8, 30)); assert.equal(r.end, at(2026, 11, 23, 16, 30));
+  r = parseQuick('formation SMS du 23/11 au 4/12', now);
+  assert.equal(ymdOf(new Date(r.start)), '2026-11-23'); assert.equal(ymdOf(r.periodEnd), '2026-12-4'); assert.equal(r.allDay, true);
+  r = parseQuick('congé du 21 au 28 décembre', now);
+  assert.equal(ymdOf(new Date(r.start)), '2026-12-21'); assert.equal(ymdOf(r.periodEnd), '2026-12-28');
+  r = parseQuick('stage pendant 10 jours ouvrables à partir du 23/11', now);
+  assert.equal(r.title, 'Stage'); assert.equal(r.periodCount, 10); assert.equal(ymdOf(r.periodEnd), '2026-12-4');
+  r = parseQuick('تكوين لمدة أسبوعين أيام العمل ابتداء من 23/11', now);
+  assert.equal(r.title, 'تكوين'); assert.equal(r.workdays, true);
+  // les durées en heures restent des durées
+  assert.equal(parseQuick('Comité le 20/11 14:00 pendant 2h', now).periodEnd, null);
+});

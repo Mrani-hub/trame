@@ -157,7 +157,7 @@ final class WidgetData {
                     if (cur.getInt(8) == 0 || hidden.contains(String.valueOf(cur.getLong(5)))) continue;
                     boolean allDay = cur.getInt(4) == 1;
                     long s = cur.getLong(2), e = cur.getLong(3);
-                    boolean inDay = allDay ? (s <= utcDay && e > utcDay) : (s < end && e > day);
+                    boolean inDay = allDay ? (s <= utcDay && e > utcDay) : (s >= day && s < end); // le jour de début fait foi
                     if (!inDay) continue;
                     Item it = new Item();
                     it.type = 1; it.id = String.valueOf(cur.getLong(0)); it.title = nz(cur.getString(1)); it.start = s; it.end = e;
@@ -171,7 +171,8 @@ final class WidgetData {
             JSONObject o = localEvents.optJSONObject(i);
             if (o == null) continue;
             long s = o.optLong("start"), e = o.optLong("end");
-            if (!(s < end && e > day)) continue;
+            boolean lAllDay = o.optBoolean("allDay");
+            if (lAllDay ? !(s < end && e > day) : !(s >= day && s < end)) continue;
             Item it = new Item();
             it.type = 1; it.local = true; it.id = o.optString("id"); it.title = o.optString("title"); it.start = s; it.end = e;
             it.allDay = o.optBoolean("allDay"); it.info = o.optString("location"); it.color = 0xFF0F766E;

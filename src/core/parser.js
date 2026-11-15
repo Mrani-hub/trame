@@ -85,7 +85,7 @@ export function parseQuick(input, now = new Date(), { hijriOffset = 0 } = {}) {
 
   const r = {
     type: null, explicitType: false, title: '', date: null, time: null, endTime: null, durationMin: null,
-    deadline: false, hijri: false, participants: [], hint: null, warnings: [],
+    deadline: false, hijri: false, participants: [], hint: null, warnings: [], periodEnd: null, periodCount: null, workdays: false,
   };
   const today = startOfDay(now);
 
@@ -104,6 +104,26 @@ export function parseQuick(input, now = new Date(), { hijriOffset = 0 } = {}) {
       const g = y ? fromHijri(y, mi + 1, d, hijriOffset) : nextHijriDate(mi + 1, d, now, hijriOffset);
       if (g && d >= 1 && d <= 30) { r.date = g; r.hijri = true; take(m.s, m.index + m[0].length); markDeadline(m.index); }
       break;
+    }
+  }
+
+  // 2 bis. Période « du 23/11 au 4/12 », « du 23 au 27 novembre », « من 23/11 إلى 4/12 »
+  if (!r.date) {
+    const MONTHS = GREG_MONTHS.map((g) => g.slice().sort((a, b) => b.length - a.length).join('|')).join('|');
+    const D1 = `(\\d{1,2}|1er)(?:[/.-](\\d{1,2})(?:[/.-](\\d{2,4}))?)?(?:\\s+(${MONTHS}))?`;
+    const D2 = `(\\d{1,2})(?:[/.-](\\d{1,2})(?:[/.-](\\d{2,4}))?)?(?:\\s+(${MONTHS}))?(?:\\s+(20\\d\\d))?`;
+    const m = find(rx(`${B}(?:du|من|ابتداء من)\\s+${D1}\\s+(?:au|jusqu['’]au|à|إلى|الى|حتى)\\s+${D2}${E}`));
+    if (m) {
+      const monthOf = (name) => (name ? GREG_MONTHS.findIndex((g) => g.includes(name)) : -1);
+      const y2 = m[7] ? (+m[7] < 100 ? 2000 + +m[7] : +m[7]) : m[9] ? +m[9] : null;
+      const mo2 = m[6] ? +m[6] - 1 : monthOf(m[8]) >= 0 ? monthOf(m[8]) : today.getMonth();
+      const mo1 = m[2] ? +m[2] - 1 : monthOf(m[4]) >= 0 ? monthOf(m[4]) : mo2;
+      const y1 = m[3] ? (+m[3] < 100 ? 2000 + +m[3] : +m[3]) : y2 ?? today.getFullYear();
+      const d1 = m[1] === '1er' ? 1 : +m[1];
+      let a = new Date(y1, mo1, d1), b = new Date(y2 ?? y1, mo2, +m[5]);
+      if (!m[3] && !y2 && a < today) { a.setFullYear(a.getFullYear() + 1); b.setFullYear(b.getFullYear() + 1); }
+      if (b < a) b.setFullYear(b.getFullYear() + 1);
+      if (mo1 >= 0 && mo2 >= 0 && d1 >= 1 && d1 <= 31) { r.date = a; r.periodEnd = b; take(m.s, m.index + m[0].length); }
     }
   }
 
@@ -219,6 +239,24 @@ export function parseQuick(input, now = new Date(), { hijriOffset = 0 } = {}) {
     if (p) { r.hint = /matin|صباح/.test(p[1]) ? 'morning' : /soir|مساء/.test(p[1]) ? 'evening' : 'afternoon'; take(p.s, p.index + p[0].length); }
   }
 
+  // 5 ter. Période exprimée en durée
+  {
+    const m = find(rx(`${B}(?:pendant|durant|sur|لمدة|مدة|طيلة)\\s+(\\d+|un|une|deux|trois|quatre|cinq|six)?\\s*(jours?|semaines?|mois|يوم|أيام|ايام|يومين|أسبوع|اسبوع|أسابيع|اسابيع|أسبوعين|اسبوعين|شهر|أشهر|شهرين)(?:\\s+(ouvrables|ouvrés|ouvres|de travail|عمل|العمل))?${E}`));
+    if (m) {
+      let n = m[1] ? (NUM_WORDS[m[1]] ?? +m[1]) : 1;
+      if (/ين$/.test(m[2])) n = 2;
+      if (m[3]) r.workdays = true;
+      const unit = /^(sem|أسب|اسب)/.test(m[2]) ? 'w' : /^(mois|شهر|أشهر)/.test(m[2]) ? 'm' : 'd';
+      r.periodSpec = { n, unit };
+      take(m.s, m.index + m[0].length);
+    }
+  }
+
+  // 5 bis. Jours ouvrables
+  {
+    const w = find(rx(`${B}(?:(?:en\\s+)?jours?\\s+(?:ouvrables|ouvrés|ouvres|de travail)|en semaine|(?:أيام|ايام)\\s+العمل|أيام الشغل)${E}`));
+    if (w) { r.workdays = true; take(w.s, w.index + w[0].length); }
+  }
   // 6. Durée
   m = find(rx(`${B}(?:pendant|durant|durée(?:\\s*:)?|duree|لمدة|مدة)\\s+(?:(\\d+)\\s*(?:h|heures?)\\s*(\\d{2})?|(\\d+)\\s*(?:min|minutes?|mn|د|دقيقة|دقائق)|(une heure|1 heure|une demi[- ]heure|ساعة|ساعتين|نصف ساعة|ربع ساعة|ساعة ونصف|(\\d+)\\s*ساعات?))${E}`));
   if (m) {
@@ -272,6 +310,24 @@ export function parseQuick(input, now = new Date(), { hijriOffset = 0 } = {}) {
   r.title = rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : '';
   if (!r.title) r.warnings.push('noTitle');
 
+  // 10 bis. Période → événement sur plusieurs jours
+  if (r.periodSpec || r.periodEnd) {
+    if (!r.date) r.date = today;
+    if (r.periodSpec && !r.periodEnd) {
+      const { n, unit } = r.periodSpec;
+      const s0 = new Date(r.date);
+      if (unit === 'd' && r.workdays) {
+        r.periodCount = n; // N jours ouvrables
+        let d = new Date(s0), k = 0;
+        for (;;) { const wd = d.getDay(); if (wd !== 0 && wd !== 6 && ++k === n) break; d = addDays(d, 1); }
+        r.periodEnd = d;
+      } else if (unit === 'm') { const e = new Date(s0); e.setMonth(e.getMonth() + n); r.periodEnd = addDays(e, -1); }
+      else r.periodEnd = addDays(s0, (unit === 'w' ? 7 * n : n) - 1);
+    }
+    delete r.periodSpec;
+    if (!r.explicitType || r.type === 'task') r.type = 'event';
+  }
+
   // 11. Construction des horodatages
   if (r.date) {
     const d = new Date(r.date);
@@ -301,6 +357,8 @@ export function parseQuick(input, now = new Date(), { hijriOffset = 0 } = {}) {
   }
   function markDeadline(i) {
     const before = low.slice(0, i);
+    const st = before.match(rx(`${B}(à partir du|à partir de|a partir du|a partir de|dès le|des le|ابتداء من|ابتداءا من|انطلاقا من)\\s*(?:le\\s+)?$`));
+    if (st) { const k = st.index + (st[0].length - st[0].trimStart().length); if (free(k, i)) take(k, i); return; }
     const dm = before.match(rx(`${B}(avant|d['’]ici|au plus tard|pour|قبل|في أجل أقصاه|أقصاه)\\s*(?:le\\s+|يوم\\s+)?$`));
     if (dm && free(dm.index, i)) {
       if (!/^pour/.test(dm[1]) || !r.type) {

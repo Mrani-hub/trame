@@ -268,7 +268,7 @@ function viewAgenda() {
     <div class="tb-title">${esc(agendaTitle())}</div>
     <button class="iconbtn" data-act="nav" data-d="1" aria-label="${t('next')}">${icon(S().lang === 'ar' ? 'left' : 'right')}</button>
   </div>
-  <div class="seg">
+  <div class="seg compact">
     <button data-act="amode" data-m="week" class="${state.agendaMode === 'week' ? 'on' : ''}">${t('week')}</button>
     <button data-act="amode" data-m="month" class="${state.agendaMode === 'month' ? 'on' : ''}">${t('month')}</button>
     ${state.agendaMode === 'month' ? `<button data-act="mcal" class="ghost">${icon('moon')} ${monthIsHijri() ? t('modeGreg') : t('modeHijri')}</button>` : ''}
@@ -304,18 +304,47 @@ function monthView() {
   const start = monthGridStart(state.cursor);
   const ref = hij ? toHijri(state.cursor, off) : null;
   const cells = [];
+  const calColor = new Map(state.calendars.map((c) => [c.id, c.color]));
+  const MAX = 4; // nombre de libellés visibles par jour, comme l'agenda Android
   for (let i = 0; i < 42; i++) {
     const d = addDays(start, i);
     const h = toHijri(d, off);
     const inMonth = hij ? h.m === ref.m && h.y === ref.y : d.getMonth() === state.cursor.getMonth();
     if (i >= 35 && !inMonth && i % 7 === 0) break;
-    const n = eventsOn(d).length + state.data.tasks.filter((x) => !x.done && x.due && sameDay(x.due, d)).length;
+    const evs = eventsOn(d).sort((a, b) => (b.allDay - a.allDay) || a.start - b.start);
+    const tks = state.data.tasks.filter((x) => !x.done && [x.due, x.remindAt, x.plannedStart].some((v) => v && sameDay(v, d)));
+    const chips = [
+      ...evs.map((e) => {
+        const col = e.birthday ? '#33B679' : normColor(e.color || calColor.get(e.calendarId)) || (e.source === 'local' ? '#0F766E' : '#1F4E79');
+        const title = e.birthday ? e.title.replace(/^🎂\s*/, '') : e.title || t('untitled');
+        return `<span class="mchip" dir="auto" style="--chip:${col};--chipfg:${inkFor(col)}">${e.birthday ? '<i>🎂</i>' : ''}${esc(title)}</span>`;
+      }),
+      ...tks.map((x) => `<span dir="auto" class="mchip task ${x.priority === 'high' ? 'high' : ''}">${x.isReminder ? '⏰' : '○'} ${esc(x.title)}</span>`),
+    ];
+    const more = chips.length > MAX ? chips.length - (MAX - 1) : 0;
+    const shown = more ? chips.slice(0, MAX - 1) : chips;
     const big = hij ? h.d : d.getDate(), small = hij ? d.getDate() : h.d;
-    cells.push(`<button class="cell ${inMonth ? '' : 'out'} ${sameDay(d, new Date()) ? 'today' : ''} ${sameDay(d, state.selDay) ? 'sel' : ''}" data-act="selday" data-t="${d.getTime()}">
-      <b>${D(big)}</b>${S().calMode !== 'greg' || hij ? `<small>${D(small)}</small>` : ''}${n ? `<i>${'•'.repeat(Math.min(n, 3))}</i>` : ''}</button>`);
+    cells.push(`<button class="mcell ${inMonth ? '' : 'out'} ${sameDay(d, new Date()) ? 'today' : ''} ${sameDay(d, state.selDay) ? 'sel' : ''}" data-act="selday" data-t="${d.getTime()}">
+      <span class="mnum"><b>${D(big)}</b>${S().calMode !== 'greg' || hij ? `<small>${D(small)}</small>` : ''}</span>
+      ${shown.join('')}${more ? `<span class="mmore">+${D(more)}</span>` : ''}</button>`);
   }
   const wd = Array.from({ length: 7 }, (_, i) => `<span>${esc(weekdayShort(addDays(startOfWeek(new Date()), i), S().lang))}</span>`).join('');
-  return `<div class="month"><div class="wd">${wd}</div><div class="grid">${cells.join('')}</div></div><p class="hint center">${t('dblTapHint')}</p>${dayBlock(state.selDay)}`;
+  return `<div class="month full"><div class="wd">${wd}</div><div class="mgrid" style="--rows:${cells.length / 7}">${cells.join('')}</div></div>
+    <p class="hint center">${t('dblTapHint')}</p>${dayBlock(state.selDay)}`;
+}
+/** Couleur CSS valide à partir de la couleur d'un agenda (#RRGGBB, #AARRGGBB ou entier Android). */
+function normColor(c) {
+  if (c == null || c === '') return null;
+  if (typeof c === 'number') return '#' + ((c >>> 0) & 0xffffff).toString(16).padStart(6, '0');
+  const m = String(c).trim().match(/^#?([0-9a-f]{8}|[0-9a-f]{6})$/i);
+  if (!m) return String(c);
+  return '#' + (m[1].length === 8 ? m[1].slice(2) : m[1]);
+}
+/** Texte blanc ou foncé selon la clarté du fond. */
+function inkFor(hex) {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex || ''); if (!m) return '#fff';
+  const n = parseInt(m[1], 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.66 ? '#1b2430' : '#fff';
 }
 
 // ——— Vue Tâches ———

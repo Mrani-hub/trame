@@ -1,5 +1,5 @@
 {
-  "version": "0.4.0",
+  "version": "0.4.1",
   "apk": "https://github.com/Mrani-hub/trame/releases/latest/download/Trame.apk",
-  "notes": "Événements sur une période (ex. formation de 2 semaines, jours ouvrables), réglage des anniversaires (rappel, affichage ou masquage), et un rendez-vous n'apparaît plus que le jour où il commence."
+  "notes": "Vue Mois façon agenda Android : chaque jour affiche ses rendez-vous en libellés colorés (couleur de l'agenda), les anniversaires avec un gâteau, les tâches, et « +N » au-delà de 4."
 }

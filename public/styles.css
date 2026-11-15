@@ -205,3 +205,27 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; }
 .hint.center { text-align: center; margin: 8px 0 0; font-size: 13px; }
 .cell { touch-action: manipulation; }
 .period-box { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+
+/* Vue Mois façon agenda Android : libellés colorés dans chaque case */
+.month.full { padding: 4px; margin-inline: -8px; border-radius: 12px; }
+.mgrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.mcell { min-height: max(96px, calc((100vh - 300px) / var(--rows))); background: var(--card); border-radius: 10px; padding: 3px 2px 4px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 2px; overflow: hidden; touch-action: manipulation; border: 1px solid transparent; }
+.month.full { background: transparent; border: 0; }
+.mcell.out { opacity: .45; }
+.mcell.sel { border-color: var(--navy); }
+.mnum { display: flex; flex-direction: column; align-items: center; line-height: 1.1; margin-bottom: 2px; }
+.mnum b { font-size: 14px; font-weight: 600; min-width: 24px; padding: 1px 4px; border-radius: 999px; text-align: center; font-variant-numeric: tabular-nums; }
+.mnum small { font-size: 9px; color: var(--muted); }
+.mcell.today .mnum b { background: var(--navy); color: var(--on-navy); }
+.mchip { display: block; background: var(--chip, var(--navy)); color: var(--chipfg, #fff); font-size: 10.5px; line-height: 1.35; padding: 1px 3px; border-radius: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: clip; text-align: start; font-weight: 500; }
+.mchip i { font-style: normal; margin-inline-end: 2px; }
+.mchip.task { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.mchip.task.high { border-color: var(--warn); color: var(--warn); }
+.mmore { font-size: 10px; color: var(--muted); text-align: center; font-weight: 600; }
+[dir="rtl"] .mchip { direction: rtl; }
+.seg.compact { flex-wrap: nowrap; overflow-x: auto; gap: 5px; scrollbar-width: none; }
+.seg.compact button { padding: 6px 11px; font-size: 13px; white-space: nowrap; flex: none; }
+.seg.compact .ic { width: 16px; height: 16px; }
+.mchip[dir="auto"] { unicode-bidi: plaintext; }

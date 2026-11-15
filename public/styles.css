@@ -199,3 +199,6 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; }
 .sug { display: flex; flex-wrap: wrap; gap: 6px; }
 .sug:empty { display: none; }
 .top-actions { display: flex; gap: 2px; }
+.brand { min-width: 0; }
+.brand > div { min-width: 0; }
+.brand small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

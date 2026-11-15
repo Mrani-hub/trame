@@ -86,7 +86,9 @@ async function ensureRange(from, to, force = false) {
   const hidden = new Set(S().hiddenCals);
   const locals = expandLocal(f, tt);
   const bdCals = new Set(state.calendars.filter((c) => c.birthday).map((c) => c.id));
-  const dev = device.filter((e) => !hidden.has(e.calendarId)).map((e) => (bdCals.has(e.calendarId) ? { ...e, birthday: true, allDay: true } : e));
+  const yearly = state.calPerm ? await P.yearlyAllDayIds(f, tt) : new Set();
+  const dev = device.filter((e) => !hidden.has(e.calendarId))
+    .map((e) => (bdCals.has(e.calendarId) || yearly.has(e.id) ? { ...e, birthday: true, allDay: true } : e));
   const bdShown = S().birthdays !== 'hide';
   state.events = [...dev.filter((e) => bdShown || !e.birthday), ...(bdShown ? contactBirthdayEvents(f, tt, dev.filter((e) => e.birthday)) : []), ...locals]
     .map((e) => { const m = metaOf(e); return { ...e, participants: m.participants || [], rule: e.repeat || m.rule || state.data.series[m.series]?.rule || null, seriesId: m.series || null, period: !!(e.period || m.period), periodStart: m.start || null }; })
@@ -227,7 +229,7 @@ function eventRow(e, conf = new Set()) {
   const n = ctx.related.length + ctx.openTasks.length;
   return `<button class="row ev" data-act="event" data-key="${esc(e.key)}" style="--c:${esc(e.color || '#1F4E79')}">
     <div class="when">${e.allDay ? t('allDayShort') : `${D(fmtTime(e.start))}<small>${D(fmtTime(e.end))}${sameDay(e.start, e.end) ? '' : ` <sup>+${Math.round((startOfDay(e.end) - startOfDay(e.start)) / DAY)}</sup>`}</small>`}</div>
-    <div class="what"><b>${esc(e.title || t('untitled'))}${!e.period && (e.recurring || e.rule || e.seriesId) ? ` <span class="rep">${icon('repeat')}</span>` : ''}</b>${(() => { const p = e.period && periodInfo(e); const sub = [p ? D(t('dayOf', p.i, p.n)) : '', e.location || ''].filter(Boolean).join(' · '); return sub ? `<small>${esc(sub)}</small>` : ''; })()}</div>
+    <div class="what"><b>${e.birthday && !/^🎂/.test(e.title || '') ? '🎂 ' : ''}${esc(e.title || t('untitled'))}${!e.period && (e.recurring || e.rule || e.seriesId) ? ` <span class="rep">${icon('repeat')}</span>` : ''}</b>${(() => { const p = e.period && periodInfo(e); const sub = [p ? D(t('dayOf', p.i, p.n)) : '', e.location || ''].filter(Boolean).join(' · '); return sub ? `<small>${esc(sub)}</small>` : ''; })()}</div>
     ${conf.has(e.key) ? `<span class="badge warn">${icon('warn')}</span>` : ''}${n ? `<span class="badge">${icon('link')}${D(n)}</span>` : ''}
   </button>`;
 }
@@ -939,7 +941,7 @@ async function applySetting(el) {
   if (k === 'hijriOffset' || k === 'calMode') state.monthCal = null;
   persist();
   if (k === 'theme') applyTheme();
-  if (k === 'birthdays') { invalidate(); pushWidget(); }
+  if (k === 'birthdays') { invalidate(); pushWidget(); rescheduleNotifs(); }
   if (k === 'lang' || k === 'calMode' || k === 'hijriOffset' || k === 'digits') { setLang(S().lang); renderSheet(); }
   render();
 }
@@ -1069,7 +1071,7 @@ function pushWidget() {
   if (P.platform !== 'android') return;
   const s = S(), from = startOfDay(new Date()).getTime() - 7 * DAY;
   P.updateWidget({
-    v: 1, lang: s.lang, calMode: s.calMode, hijriOffset: s.hijriOffset, digits: s.digits,
+    v: 1, lang: s.lang, calMode: s.calMode, birthdays: s.birthdays, hijriOffset: s.hijriOffset, digits: s.digits,
     hiddenCals: s.birthdays === 'hide' ? [...s.hiddenCals, ...state.calendars.filter((c) => c.birthday).map((c) => c.id)] : s.hiddenCals,
     calPerm: state.calPerm,
     localEvents: [...expandLocal(from, from + 130 * DAY), ...(s.birthdays === 'hide' ? [] : contactBirthdayEvents(from, from + 130 * DAY, []))].map((e) => ({ id: e.id, title: e.title, start: e.start, end: e.end, allDay: !!e.allDay, location: e.location || '' })),
@@ -1124,7 +1126,8 @@ async function rescheduleNotifs() {
     const from = startOfDay(new Date()).getTime(), to = from + 8 * DAY;
     const device = state.calPerm ? await P.listDeviceEvents(from, to) : [];
     const bdCals = new Set(state.calendars.filter((c) => c.birthday).map((c) => c.id));
-    const bds = device.filter((e) => bdCals.has(e.calendarId) && !s.hiddenCals.includes(e.calendarId));
+    const yearly = await P.yearlyAllDayIds(from, to);
+    const bds = device.filter((e) => (bdCals.has(e.calendarId) || yearly.has(e.id)) && !s.hiddenCals.includes(e.calendarId));
     const all = [...bds.map((e) => ({ ...e, birthday: true })), ...contactBirthdayEvents(from, to, bds)];
     for (const e of all) {
       const day = startOfDay(e.start).getTime();
@@ -1380,7 +1383,7 @@ function bind() {
     if (el.dataset.cal) {
       const h = new Set(S().hiddenCals);
       el.checked ? h.delete(el.dataset.cal) : h.add(el.dataset.cal);
-      S().hiddenCals = [...h]; invalidate(); persist(); render();
+      S().hiddenCals = [...h]; invalidate(); persist(); render(); pushWidget();
     }
   });
 }

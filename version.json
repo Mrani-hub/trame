@@ -1,5 +1,5 @@
 {
-  "version": "0.4.1",
+  "version": "0.4.2",
   "apk": "https://github.com/Mrani-hub/trame/releases/latest/download/Trame.apk",
-  "notes": "Vue Mois façon agenda Android : chaque jour affiche ses rendez-vous en libellés colorés (couleur de l'agenda), les anniversaires avec un gâteau, les tâches, et « +N » au-delà de 4."
+  "notes": "Anniversaires masqués aussi dans le widget, y compris ceux que Google Agenda range dans l'agenda principal."
 }

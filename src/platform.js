@@ -247,6 +247,11 @@ export async function updateWidget(payload) {
   } catch (e) { console.warn('widget', e); }
 }
 /** Action demandée par le widget à l'ouverture (« capture », « event »…), consommée une seule fois. */
+/** Android : identifiants des rendez-vous annuels « toute la journée » (anniversaires dans l'agenda principal de Google). */
+export async function yearlyAllDayIds(from, to) {
+  if (platform !== 'android') return new Set();
+  try { const r = await TrameWidget.yearlyAllDayIds({ from, to }); return new Set((r?.ids || []).map(String)); } catch { return new Set(); }
+}
 export async function consumeLaunchAction() {
   if (platform !== 'android') return null;
   try { const r = await TrameWidget.consumeLaunch(); return r?.action ? r : null; } catch { return null; }

@@ -38,7 +38,7 @@ final class WidgetData {
     private static final String[] HIJRI_FR = {"Mouharram", "Safar", "Rabia I", "Rabia II", "Joumada I", "Joumada II", "Rajab", "Chaabane", "Ramadan", "Chaoual", "Dhou al-qi’da", "Dhou al-hijja"};
     private static final String[] HIJRI_AR = {"محرم", "صفر", "ربيع الأول", "ربيع الآخر", "جمادى الأولى", "جمادى الآخرة", "رجب", "شعبان", "رمضان", "شوال", "ذو القعدة", "ذو الحجة"};
 
-    String lang = "fr", calMode = "both";
+    String lang = "fr", calMode = "both", birthdays = "remind";
     int hijriOffset = 0;
     boolean arabDigits = false;
     Set<String> hidden = new HashSet<>();
@@ -57,6 +57,7 @@ final class WidgetData {
                 JSONObject j = new JSONObject(new String(buf, StandardCharsets.UTF_8));
                 d.lang = j.optString("lang", "fr");
                 d.calMode = j.optString("calMode", "both");
+                d.birthdays = j.optString("birthdays", "remind");
                 d.hijriOffset = j.optInt("hijriOffset", 0);
                 d.arabDigits = "arab".equals(j.optString("digits"));
                 JSONArray h = j.optJSONArray("hiddenCals");
@@ -145,7 +146,8 @@ final class WidgetData {
             ContentUris.appendId(b, end + DAY);
             String[] proj = {CalendarContract.Instances.EVENT_ID, CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN,
                     CalendarContract.Instances.END, CalendarContract.Instances.ALL_DAY, CalendarContract.Instances.CALENDAR_ID,
-                    CalendarContract.Instances.EVENT_LOCATION, CalendarContract.Instances.DISPLAY_COLOR, CalendarContract.Instances.VISIBLE};
+                    CalendarContract.Instances.EVENT_LOCATION, CalendarContract.Instances.DISPLAY_COLOR, CalendarContract.Instances.VISIBLE,
+                    CalendarContract.Instances.RRULE, CalendarContract.Instances.CALENDAR_DISPLAY_NAME};
             Calendar local = Calendar.getInstance();
             local.setTimeInMillis(day);
             Calendar utc = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
@@ -156,11 +158,13 @@ final class WidgetData {
                 while (cur != null && cur.moveToNext()) {
                     if (cur.getInt(8) == 0 || hidden.contains(String.valueOf(cur.getLong(5)))) continue;
                     boolean allDay = cur.getInt(4) == 1;
+                    boolean bday = isBirthday(allDay, cur.getString(9), cur.getString(10));
+                    if (bday && "hide".equals(birthdays)) continue;
                     long s = cur.getLong(2), e = cur.getLong(3);
                     boolean inDay = allDay ? (s <= utcDay && e > utcDay) : (s >= day && s < end); // le jour de début fait foi
                     if (!inDay) continue;
                     Item it = new Item();
-                    it.type = 1; it.id = String.valueOf(cur.getLong(0)); it.title = nz(cur.getString(1)); it.start = s; it.end = e;
+                    it.type = 1; it.id = String.valueOf(cur.getLong(0)); it.title = (bday ? "🎂 " : "") + nz(cur.getString(1)); it.start = s; it.end = e;
                     it.allDay = allDay; it.info = nz(cur.getString(6)); it.color = cur.getInt(7);
                     events.add(it);
                 }
@@ -213,6 +217,30 @@ final class WidgetData {
             out.add(sec);
             out.addAll(todo);
         }
+        return out;
+    }
+
+    private static final java.util.regex.Pattern BDAY_CAL = java.util.regex.Pattern.compile(
+            "birthday|anniversaire|cumpleaños|geburtstag|عيد ميلاد|أعياد الميلاد|contacts", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /** Anniversaire : journée entière répétée chaque année, ou agenda d'anniversaires. */
+    static boolean isBirthday(boolean allDay, String rrule, String calName) {
+        if (calName != null && BDAY_CAL.matcher(calName).find()) return true;
+        return allDay && rrule != null && rrule.toUpperCase(Locale.ROOT).contains("FREQ=YEARLY");
+    }
+
+    static List<String> yearlyAllDayIds(Context c, long from, long to) {
+        List<String> out = new ArrayList<>();
+        if (c.checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) return out;
+        Uri.Builder b = CalendarContract.Instances.CONTENT_URI.buildUpon();
+        ContentUris.appendId(b, from);
+        ContentUris.appendId(b, to);
+        String[] proj = {CalendarContract.Instances.EVENT_ID, CalendarContract.Instances.ALL_DAY, CalendarContract.Instances.RRULE, CalendarContract.Instances.CALENDAR_DISPLAY_NAME};
+        try (Cursor cur = c.getContentResolver().query(b.build(), proj, null, null, null)) {
+            while (cur != null && cur.moveToNext()) {
+                if (isBirthday(cur.getInt(1) == 1, cur.getString(2), cur.getString(3))) out.add(String.valueOf(cur.getLong(0)));
+            }
+        } catch (Exception ignored) { }
         return out;
     }
 

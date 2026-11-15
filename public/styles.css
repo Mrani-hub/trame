@@ -198,3 +198,4 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; }
 .actions.col .btn { justify-content: center; margin: 0; }
 .sug { display: flex; flex-wrap: wrap; gap: 6px; }
 .sug:empty { display: none; }
+.top-actions { display: flex; gap: 2px; }

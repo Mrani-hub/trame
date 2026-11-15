@@ -42,6 +42,7 @@ const ICONS = {
   warn: '<path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17v.5"/>', share: '<circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.2 10.8l7.6-3.6M8.2 13.2l7.6 3.6"/>',
   left: '<path d="M15 5l-7 7 7 7"/>', right: '<path d="M9 5l7 7-7 7"/>', check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
   moon: '<path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/>', clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21M8.5 21h7"/>',
   wa: '<path d="M4 20l1.2-3.6A8 8 0 1112 20a8 8 0 01-3.9-1z"/><path d="M9 9.2c.3 2.4 2.2 4.6 5 5.4l1.2-1.2-1.6-1-.8.6c-.9-.4-1.8-1.3-2.2-2.2l.6-.8-1-1.6z"/>',
@@ -124,12 +125,15 @@ async function render() {
   $('#app').innerHTML = `
     <header class="top">
       <div class="brand"><span class="logo">T</span><div><b>Trame</b><small>${esc(fmtDate(Date.now(), { weekday: true }))}</small></div></div>
-      <button class="iconbtn" data-act="settings" aria-label="${t('settings')}">${icon('gear')}</button>
+      <div class="top-actions">
+        <button class="iconbtn" data-act="theme" aria-label="${t(isDark() ? 'themeLight' : 'themeDark')}">${icon(isDark() ? 'sun' : 'moon')}</button>
+        <button class="iconbtn" data-act="settings" aria-label="${t('settings')}">${icon('gear')}</button>
+      </div>
     </header>
     <form class="capture" id="capForm" autocomplete="off">
       <input id="capIn" enterkeyhint="send" placeholder="${esc(t('capturePh'))}" aria-label="${esc(t('capturePh'))}">
       ${P.voiceSupported() ? `<button type="button" class="micbtn ${state.listening ? 'on' : ''}" data-act="voice" aria-label="${esc(t('voice'))}">${icon('mic')}</button>` : ''}
-      <button class="capbtn" aria-label="+">${icon('plus')}</button>
+      <button type="button" class="capbtn" data-act="add" aria-label="${esc(t('addNew'))}">${icon('plus')}</button>
     </form>
     <main id="main">${views[state.view]()}</main>
     <nav class="tabs">${['today', 'agenda', 'tasks', 'notes', 'search'].map((v) => `
@@ -138,6 +142,7 @@ async function render() {
   if (state.view === 'search') { const i = $('#q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
 }
 
+const isDark = () => { const th = S().theme || 'auto'; return th === 'dark' || (th === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches); };
 function applyTheme() {
   const th = S().theme || 'auto';
   if (th === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = th;
@@ -1014,7 +1019,29 @@ async function rescheduleNotifs() {
 }
 
 // ——— Actions ———
+/** Bouton + ou touche Entrée : analyse la phrase saisie, ou ouvre un formulaire vide si rien n'est saisi. */
+function capture() {
+  const v = $('#capIn')?.value.trim();
+  if (v) {
+    const r = parseQuick(v, new Date(), { hijriOffset: S().hijriOffset });
+    $('#capIn').value = '';
+    openSheet({ kind: 'edit', draft: draftFromParse(r) });
+    return;
+  }
+  const s = new Date(); s.setMinutes(0, 0, 0); s.setHours(s.getHours() + 1);
+  const day = state.view === 'agenda' ? new Date(state.selDay) : new Date();
+  day.setHours(s.getHours(), 0, 0, 0);
+  openSheet({ kind: 'edit', draft: {
+    type: 'event', title: '', date: ymd(day), time: hm(day), endTime: hm(day.getTime() + S().defaultDur * MIN), allDay: false,
+    durationMin: 30, priority: 'normal', assignee: '', location: '', participants: [], body: '',
+    calendarId: S().writeCal || (state.calPerm ? '' : 'local'),
+  } });
+  setTimeout(() => $('#editForm [name=title]')?.focus(), 250);
+}
+
 const actions = {
+  add: () => capture(),
+  theme: () => { S().theme = isDark() ? 'light' : 'dark'; applyTheme(); persist(); render(); },
   view: (b) => { state.view = b.dataset.v; if (state.view === 'agenda') state.cursor = startOfDay(new Date()); render(); window.scrollTo(0, 0); },
   settings: () => openSheet({ kind: 'settings' }),
   close: () => { const wasNote = state.sheet?.kind === 'note'; closeSheet(); if (wasNote) render(); },
@@ -1191,12 +1218,7 @@ function bind() {
   });
   document.addEventListener('submit', (ev) => {
     ev.preventDefault();
-    if (ev.target.id === 'capForm') {
-      const v = $('#capIn').value.trim(); if (!v) return;
-      const r = parseQuick(v, new Date(), { hijriOffset: S().hijriOffset });
-      $('#capIn').value = '';
-      openSheet({ kind: 'edit', draft: draftFromParse(r) });
-    }
+    if (ev.target.id === 'capForm') capture();
     if (ev.target.id === 'editForm') saveEdit();
   });
   document.addEventListener('input', (ev) => {

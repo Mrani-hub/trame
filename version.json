@@ -1,5 +1,5 @@
 {
-  "version": "0.3.0",
+  "version": "0.3.1",
   "apk": "https://github.com/Mrani-hub/trame/releases/latest/download/Trame.apk",
-  "notes": "Répétition des rendez-vous, tâches et rappels (comme l'agenda Android, avec le calendrier hégirien) et choix des contacts du téléphone pour WhatsApp."
+  "notes": "Bouton + : ouvre un formulaire vide quand rien n'est saisi. Bouton clair/sombre en haut de l'écran."
 }

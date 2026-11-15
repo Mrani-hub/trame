@@ -1,6 +1,6 @@
 {
   "name": "trame",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Trame — agenda, tâches et notes pour professionnels (FR/AR, hégirien)",
   "type": "module",

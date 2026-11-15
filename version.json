@@ -1,5 +1,5 @@
 {
-  "version": "0.5.0",
+  "version": "0.5.1",
   "apk": "https://github.com/Mrani-hub/trame/releases/latest/download/Trame.apk",
-  "notes": "Modification complète dans Trame (y compris rendez-vous répétitifs : cette occurrence ou toute la série), choix de la couleur des rendez-vous, corrections d'affichage."
+  "notes": "Pont avec Google Keep : envoyer une note vers Keep, et recevoir dans Trame le texte partagé depuis Keep (ou une autre appli)."
 }

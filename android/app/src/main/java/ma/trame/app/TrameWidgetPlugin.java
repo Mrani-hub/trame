@@ -25,6 +25,18 @@ public class TrameWidgetPlugin extends Plugin {
     /** Mémorise l'action demandée par le widget (lue ensuite par le JavaScript). */
     static void capture(Intent i) {
         if (i == null) return;
+        // Texte partagé depuis une autre appli (Keep, WhatsApp, Gmail…)
+        if (Intent.ACTION_SEND.equals(i.getAction()) && "text/plain".equals(i.getType())) {
+            String text = i.getStringExtra(Intent.EXTRA_TEXT);
+            if (text == null || text.trim().isEmpty()) return;
+            JSObject o = new JSObject();
+            o.put("action", "shared");
+            o.put("text", text);
+            o.put("subject", i.getStringExtra(Intent.EXTRA_SUBJECT) == null ? "" : i.getStringExtra(Intent.EXTRA_SUBJECT));
+            pending = o;
+            i.setAction(Intent.ACTION_MAIN);
+            return;
+        }
         String action = i.getStringExtra("trame_action");
         if (action == null) return;
         JSObject o = new JSObject();
@@ -151,6 +163,31 @@ public class TrameWidgetPlugin extends Plugin {
             Uri uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, Long.parseLong(call.getString("id")));
             getContext().getContentResolver().update(uri, v, null, null);
             call.resolve();
+        } catch (Exception e) { call.reject(e.getMessage()); }
+    }
+
+    /** Envoie du texte à une appli précise (ex. Google Keep) ; sinon, feuille de partage du système. */
+    @PluginMethod
+    public void shareTo(PluginCall call) {
+        String pkg = call.getString("package");
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_SUBJECT, call.getString("title", ""));
+        send.putExtra(Intent.EXTRA_TEXT, call.getString("text", ""));
+        send.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        JSObject r = new JSObject();
+        try {
+            if (pkg != null && getContext().getPackageManager().getLaunchIntentForPackage(pkg) != null) {
+                send.setPackage(pkg);
+                getContext().startActivity(send);
+                r.put("direct", true);
+            } else {
+                Intent chooser = Intent.createChooser(send, call.getString("title", "Trame"));
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(chooser);
+                r.put("direct", false);
+            }
+            call.resolve(r);
         } catch (Exception e) { call.reject(e.getMessage()); }
     }
 

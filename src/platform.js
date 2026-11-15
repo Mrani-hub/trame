@@ -347,3 +347,11 @@ export async function setEventColor(id, color) {
   if (platform !== 'android') return;
   try { await TrameWidget.setEventColor({ id, color: color || '' }); } catch (e) { console.warn('color', e); }
 }
+
+// ——— Google Keep (pas d'API pour les comptes personnels : passage par le partage Android) ———
+export async function sendToKeep(title, text) {
+  if (platform === 'android') {
+    try { return await TrameWidget.shareTo({ package: 'com.google.android.keep', title, text }); } catch (e) { console.warn('keep', e); }
+  }
+  return shareText(title, text);
+}

@@ -452,6 +452,7 @@ function sheetEdit() {
     <div class="sheet-head"><b>${d.existing ? t('edit') : d.parsed ? t('confirmTitle') : t('save')}</b><button type="button" class="iconbtn" data-act="close" aria-label="${t('close')}">✕</button></div>
     ${d.parsed ? `<p class="hint">${t('parsedHint')}</p>` : ''}
     ${d.heard ? `<p class="heard">${icon('mic')} « ${esc(d.heard)} »</p>` : ''}
+    ${d.fromShare ? `<p class="heard">📒 ${esc(t('fromShare'))}</p>` : ''}
     ${!d.existing ? `<div class="seg types">${types.map((x) => `<button type="button" data-act="etype" data-t="${x}" class="${d.type === x ? 'on' : ''}">${t(tName[x])}</button>`).join('')}</div>` : ''}
     ${d.type !== 'note' ? `<label>${t('title')}<input name="title" value="${esc(d.title)}" required></label>` : `<label>${t('title')}<input name="title" value="${esc(d.title)}" placeholder="${esc(t('noteTitlePh'))}"></label><label>${t('body')}<textarea name="body" rows="5">${esc(d.body)}</textarea></label>`}
     ${d.type !== 'note' ? `
@@ -657,6 +658,12 @@ async function saveEdit(draft = null) {
       if (k && !k.startsWith('loc:')) state.data.eventMeta[k] = { ...(state.data.eventMeta[k] || {}), color: color || null };
       if (d.participants?.length) state.data.eventMeta[k] = { ...(state.data.eventMeta[k] || {}), participants: d.participants };
     }
+    if (d.sharedText && d.sharedText.trim() !== d.title.trim()) {
+      const ev2 = state.events.find((e) => e.key === key) || { key, title: d.title, start: ev.start };
+      const n = { id: uid('n'), title: d.title, body: d.sharedText, created: now, updated: now, meeting: null };
+      linkNote(n, { ...ev2, key, title: d.title, start: ev.start });
+      state.data.notes.push(n);
+    }
     invalidate();
   } else if (d.type === 'note') {
     const n = { id: uid('n'), title: d.title || firstLine(d.body), body: d.body, created: now, updated: now, meeting: null };
@@ -672,6 +679,7 @@ async function saveEdit(draft = null) {
       repeat: d.repeat ? normalizeRule(d.repeat, isRem ? combine(d.date, d.time || '09:00') : (d.date ? parseYmd(d.date).getTime() : Date.now())) : null,
     });
     if (x.repeat && !(x.due || x.remindAt)) x.due = startOfDay(new Date()).getTime();
+    if (d.sharedText && !x.notes) x.notes = d.sharedText;
     x.repeatStart = x.repeat ? (x.due || x.remindAt) : null;
     if (!d.existing) state.data.tasks.push(x);
   }
@@ -1151,6 +1159,23 @@ function pushWidget() {
   });
 }
 
+/** Texte reçu d'une autre appli (Keep…) : rendez-vous / tâche / rappel si une date est détectée, sinon note. */
+async function receiveShared(subject, text) {
+  state.view = 'today'; await render();
+  const body = String(text).trim();
+  const head = (subject || body.split('\n')[0]).trim();
+  const r = parseQuick(subject ? `${subject} ${body.split('\n')[0]}` : head, new Date(), { hijriOffset: S().hijriOffset });
+  let d;
+  if (r.start && r.type !== 'note') {
+    d = { ...draftFromParse(r), body, sharedText: body };
+    if (!d.title) d.title = head.slice(0, 80);
+  } else {
+    d = { type: 'note', title: subject || (body.includes('\n') ? head.slice(0, 80) : ''), body: subject ? body : body.includes('\n') ? body.split('\n').slice(1).join('\n').trim() : body, parsed: true };
+  }
+  d.fromShare = true;
+  openSheet({ kind: 'edit', draft: d });
+}
+
 async function handleLaunch() {
   const a = await P.consumeLaunchAction();
   if (!a) return;
@@ -1165,6 +1190,7 @@ async function handleLaunch() {
     if (e) openSheet({ kind: 'event', ev: e });
   }
   if (a.action === 'task' && a.id) openTaskEditor(a.id);
+  if (a.action === 'shared' && a.text) receiveShared(a.subject || '', a.text);
 }
 
 // ——— Notifications programmées ———
@@ -1328,13 +1354,14 @@ const actions = {
     $('#shareMenu')?.remove();
     const m = document.createElement('div');
     m.id = 'shareMenu'; m.className = 'menu';
-    m.innerHTML = `<button data-act="nsh" data-f="text">${t('shareText')}</button><button data-act="nsh" data-f="pdf">${t('sharePdf')}</button><button data-act="nsh" data-f="trame">${t('shareTrame')}</button>`;
+    m.innerHTML = `<button data-act="nsh" data-f="keep">📒 Google Keep</button><button data-act="nsh" data-f="text">${t('shareText')}</button><button data-act="nsh" data-f="pdf">${t('sharePdf')}</button><button data-act="nsh" data-f="trame">${t('shareTrame')}</button>`;
     $('#sheet .panel').appendChild(m);
   },
   nsh: async (b) => {
     $('#shareMenu')?.remove();
     const n = state.sheet.note, name = (n.title || 'note').slice(0, 40);
     try {
+      if (b.dataset.f === 'keep') { const r = await P.sendToKeep(n.title || t('untitled'), noteToText(n, S()).replace(/^.*\n/, '').trim()); if (r === 'copied') toast(t('copied')); }
       if (b.dataset.f === 'text') { const r = await P.shareText(n.title, noteToText(n, S())); if (r === 'copied') toast(t('copied')); }
       if (b.dataset.f === 'pdf') await P.shareFile(`${name}.pdf`, await noteToPdf(n, S()), 'application/pdf', n.title);
       if (b.dataset.f === 'trame') await P.shareFile(`${name}.trame`, makeShare('note', n), 'application/json', n.title);

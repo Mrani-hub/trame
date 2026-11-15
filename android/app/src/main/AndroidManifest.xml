@@ -22,6 +22,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Recevoir du texte partagé (Google Keep, WhatsApp, Gmail…) : « Envoyer » → Trame -->
+            <intent-filter android:label="Trame">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
         </activity>
 
         <receiver
@@ -58,6 +65,7 @@
     <!-- Applications que Trame peut ouvrir ou interroger (Android 11+) -->
     <queries>
         <package android:name="com.whatsapp" />
+        <package android:name="com.google.android.keep" />
         <package android:name="com.whatsapp.w4b" />
         <intent>
             <action android:name="android.intent.action.VIEW" />

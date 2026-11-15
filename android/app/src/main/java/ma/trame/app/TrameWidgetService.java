@@ -47,7 +47,7 @@ public class TrameWidgetService extends RemoteViewsService {
             rv.setTextViewText(R.id.w_name, it.type == 2 ? "○  " + it.title : it.title);
             rv.setTextViewText(R.id.w_info, it.info);
             rv.setViewVisibility(R.id.w_info, it.info.isEmpty() ? View.GONE : View.VISIBLE);
-            rv.setInt(R.id.w_bar, "setBackgroundColor", it.color != 0 ? (it.color | 0xFF000000) : 0xFF1F4E79);
+            rv.setInt(R.id.w_bar, "setBackgroundColor", it.color != 0 ? (it.color | 0xFF000000) : 0xFF6EA8DC);
             Intent fill = new Intent();
             if (it.type == 1) fill.putExtra("trame_action", "event").putExtra("id", it.id).putExtra("start", it.start).putExtra("local", it.local);
             else fill.putExtra("trame_action", "task").putExtra("id", it.id);

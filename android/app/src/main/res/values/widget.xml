@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="w_bg">#FFFFFFFF</color>
-    <color name="w_text">#FF17212C</color>
-    <color name="w_muted">#FF5D6B7A</color>
-    <color name="w_accent">#FF1F4E79</color>
-    <color name="w_on_accent">#FFFFFFFF</color>
+    <!-- Widget toujours en mode sombre, quel que soit le thème du téléphone -->
+    <color name="w_bg">#FF17202A</color>
+    <color name="w_text">#FFE6EBF1</color>
+    <color name="w_muted">#FF9AA8B7</color>
+    <color name="w_accent">#FF6EA8DC</color>
+    <color name="w_on_accent">#FF0F151C</color>
     <string name="widget_description">Rendez-vous et tâches du jour</string>
 </resources>

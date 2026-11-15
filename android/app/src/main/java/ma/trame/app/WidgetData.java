@@ -200,7 +200,7 @@ final class WidgetData {
             it.start = when > 0 ? when : (late ? 0 : day + DAY - 1);
             it.t1 = when > 0 ? hm(when) : "";
             it.info = late ? t("late") : (o.optBoolean("reminder") ? t("reminder") : "");
-            it.color = it.high ? 0xFFC2410C : 0xFF5D6B7A;
+            it.color = it.high ? 0xFFF97316 : 0xFF9AA8B7;
             todo.add(it);
         }
         Collections.sort(todo, (a, b2) -> Long.compare(a.start, b2.start));

@@ -291,7 +291,7 @@ function monthView() {
       <b>${D(big)}</b>${S().calMode !== 'greg' || hij ? `<small>${D(small)}</small>` : ''}${n ? `<i>${'•'.repeat(Math.min(n, 3))}</i>` : ''}</button>`);
   }
   const wd = Array.from({ length: 7 }, (_, i) => `<span>${esc(weekdayShort(addDays(startOfWeek(new Date()), i), S().lang))}</span>`).join('');
-  return `<div class="month"><div class="wd">${wd}</div><div class="grid">${cells.join('')}</div></div>${dayBlock(state.selDay)}`;
+  return `<div class="month"><div class="wd">${wd}</div><div class="grid">${cells.join('')}</div></div><p class="hint center">${t('dblTapHint')}</p>${dayBlock(state.selDay)}`;
 }
 
 // ——— Vue Tâches ———
@@ -1020,15 +1020,15 @@ async function rescheduleNotifs() {
 
 // ——— Actions ———
 /** Bouton + ou touche Entrée : analyse la phrase saisie, ou ouvre un formulaire vide si rien n'est saisi. */
-function capture() {
-  const v = $('#capIn')?.value.trim();
+function capture(blank = false) {
+  const v = blank ? '' : $('#capIn')?.value.trim();
   if (v) {
     const r = parseQuick(v, new Date(), { hijriOffset: S().hijriOffset });
     $('#capIn').value = '';
     openSheet({ kind: 'edit', draft: draftFromParse(r) });
     return;
   }
-  const s = new Date(); s.setMinutes(0, 0, 0); s.setHours(s.getHours() + 1);
+  const s = new Date(); s.setMinutes(0, 0, 0); s.setHours(blank && !sameDay(state.selDay, new Date()) ? 9 : s.getHours() + 1);
   const day = state.view === 'agenda' ? new Date(state.selDay) : new Date();
   day.setHours(s.getHours(), 0, 0, 0);
   openSheet({ kind: 'edit', draft: {
@@ -1080,7 +1080,15 @@ const actions = {
   },
   amode: (b) => { state.agendaMode = b.dataset.m; render(); },
   mcal: () => { state.monthCal = monthIsHijri() ? 'greg' : 'hijri'; render(); },
-  selday: (b) => { state.selDay = new Date(+b.dataset.t); render(); },
+  selday: (b) => {
+    // double appui sur un jour (≤ 400 ms) : nouveau rendez-vous ce jour-là
+    const tms = +b.dataset.t, now = Date.now();
+    const dbl = state.lastTap && state.lastTap.t === tms && now - state.lastTap.at < 400;
+    state.lastTap = dbl ? null : { t: tms, at: now };
+    state.selDay = new Date(tms);
+    if (dbl) { capture(true); return; }
+    render();
+  },
   tfilter: (b) => { state.taskFilter = b.dataset.f; render(); },
   newtask: () => openSheet({ kind: 'edit', draft: { type: 'task', title: '', date: '', durationMin: 30, priority: 'normal', assignee: '' } }),
   newnote: () => newNote(false),

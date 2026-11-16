@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="w_prev">اليوم السابق</string>
+    <string name="w_next">اليوم التالي</string>
+    <string name="w_today">اليوم</string>
+    <string name="widget_description">مواعيد ومهام اليوم</string>
+</resources>

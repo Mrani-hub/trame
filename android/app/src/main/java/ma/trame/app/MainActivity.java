@@ -9,13 +9,13 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(TrameWidgetPlugin.class);
         super.onCreate(savedInstanceState);
-        TrameWidgetPlugin.capture(getIntent());
+        TrameWidgetPlugin.capture(this, getIntent());
     }
 
     @Override
     public void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        TrameWidgetPlugin.capture(intent);
+        TrameWidgetPlugin.capture(this, intent);
     }
 }

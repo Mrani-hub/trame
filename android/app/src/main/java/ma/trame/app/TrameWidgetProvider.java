@@ -38,9 +38,12 @@ public class TrameWidgetProvider extends AppWidgetProvider {
             case ACT_PREV: case ACT_NEXT: case ACT_TODAY: {
                 if (id == AppWidgetManager.INVALID_APPWIDGET_ID) return;
                 int off = ACT_TODAY.equals(a) ? 0 : p.getInt("off_" + id, 0) + (ACT_NEXT.equals(a) ? 1 : -1);
-                p.edit().putInt("off_" + id, off).apply();
+                p.edit().putInt("off_" + id, off).commit(); // commit : la liste relit le décalage juste après
                 AppWidgetManager mgr = AppWidgetManager.getInstance(ctx);
-                update(ctx, mgr, id);
+                // Réponse immédiate : seul l'en-tête est redessiné, puis la liste est rechargée
+                RemoteViews head = new RemoteViews(ctx.getPackageName(), R.layout.widget_trame);
+                fillHeader(ctx, head, WidgetData.load(ctx), off);
+                mgr.partiallyUpdateAppWidget(id, head);
                 mgr.notifyAppWidgetViewDataChanged(id, R.id.w_list);
                 break;
             }
@@ -73,20 +76,15 @@ public class TrameWidgetProvider extends AppWidgetProvider {
 
     static void update(Context ctx, AppWidgetManager mgr, int id) {
         WidgetData d = WidgetData.load(ctx);
-        int off = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("off_" + id, 0);
+        int off = offset(ctx, id);
         long day = WidgetData.dayStart(off);
         RemoteViews rv = new RemoteViews(ctx.getPackageName(), R.layout.widget_trame);
-        rv.setTextViewText(R.id.w_title, off == 0 ? d.t("today") + " · " + d.title(day) : d.title(day));
-        String sub = d.subtitle(day);
-        rv.setTextViewText(R.id.w_sub, sub);
-        rv.setViewVisibility(R.id.w_sub, sub.isEmpty() ? View.GONE : View.VISIBLE);
-        rv.setViewVisibility(R.id.w_today, off == 0 ? View.GONE : View.VISIBLE);
-        rv.setTextViewText(R.id.w_empty, d.t(off == 0 ? "emptyToday" : "empty"));
+        fillHeader(ctx, rv, d, off);
 
+        // Adaptateur fixe par widget : la liste lit le jour affiché dans les préférences (pas de nouvelle liste à chaque flèche)
         Intent svc = new Intent(ctx, TrameWidgetService.class);
         svc.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id);
-        svc.putExtra("day", day);
-        svc.setData(Uri.parse(svc.toUri(Intent.URI_INTENT_SCHEME)));
+        svc.setData(Uri.parse("trame://widget/" + id));
         rv.setRemoteAdapter(R.id.w_list, svc);
         rv.setEmptyView(R.id.w_list, R.id.w_empty);
 
@@ -94,10 +92,25 @@ public class TrameWidgetProvider extends AppWidgetProvider {
         rv.setOnClickPendingIntent(R.id.w_next, broadcast(ctx, ACT_NEXT, id, 3));
         rv.setOnClickPendingIntent(R.id.w_today, broadcast(ctx, ACT_TODAY, id, 4));
         rv.setOnClickPendingIntent(R.id.w_add, activity(ctx, new Intent().putExtra("trame_action", "capture"), id * 10 + 5, false));
-        rv.setOnClickPendingIntent(R.id.w_head, activity(ctx, new Intent().putExtra("trame_action", "day").putExtra("day", day), id * 10 + 6, false));
-        rv.setOnClickPendingIntent(R.id.w_empty, activity(ctx, new Intent().putExtra("trame_action", "day").putExtra("day", day), id * 10 + 7, false));
+        rv.setOnClickPendingIntent(R.id.w_head, activity(ctx, new Intent().putExtra("trame_action", "day").putExtra("widgetId", id), id * 10 + 6, false));
+        rv.setOnClickPendingIntent(R.id.w_empty, activity(ctx, new Intent().putExtra("trame_action", "day").putExtra("widgetId", id), id * 10 + 7, false));
         rv.setPendingIntentTemplate(R.id.w_list, activity(ctx, new Intent(), id * 10 + 8, true));
         mgr.updateAppWidget(id, rv);
+    }
+
+    static int offset(Context ctx, int id) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("off_" + id, 0);
+    }
+
+    /** En-tête : date (grégorienne/hégirienne), retour à aujourd'hui, message de liste vide. */
+    private static void fillHeader(Context ctx, RemoteViews rv, WidgetData d, int off) {
+        long day = WidgetData.dayStart(off);
+        rv.setTextViewText(R.id.w_title, off == 0 ? d.t("today") + " · " + d.title(day) : d.title(day));
+        String sub = d.subtitle(day);
+        rv.setTextViewText(R.id.w_sub, sub);
+        rv.setViewVisibility(R.id.w_sub, sub.isEmpty() ? View.GONE : View.VISIBLE);
+        rv.setViewVisibility(R.id.w_today, off == 0 ? View.GONE : View.VISIBLE);
+        rv.setTextViewText(R.id.w_empty, d.t(off == 0 ? "emptyToday" : "empty"));
     }
 
     private static PendingIntent broadcast(Context ctx, String action, int id, int k) {

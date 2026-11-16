@@ -23,7 +23,7 @@ public class TrameWidgetPlugin extends Plugin {
     private static JSObject pending;
 
     /** Mémorise l'action demandée par le widget (lue ensuite par le JavaScript). */
-    static void capture(Intent i) {
+    static void capture(android.content.Context ctx, Intent i) {
         if (i == null) return;
         // Texte partagé depuis une autre appli (Keep, WhatsApp, Gmail…)
         if (Intent.ACTION_SEND.equals(i.getAction()) && "text/plain".equals(i.getType())) {
@@ -44,6 +44,7 @@ public class TrameWidgetPlugin extends Plugin {
         if (i.hasExtra("id")) o.put("id", i.getStringExtra("id"));
         if (i.hasExtra("start")) o.put("start", i.getLongExtra("start", 0));
         if (i.hasExtra("day")) o.put("day", i.getLongExtra("day", 0));
+        if (i.hasExtra("widgetId")) o.put("day", WidgetData.dayStart(TrameWidgetProvider.offset(ctx, i.getIntExtra("widgetId", 0))));
         o.put("local", i.getBooleanExtra("local", false));
         pending = o;
         i.removeExtra("trame_action");

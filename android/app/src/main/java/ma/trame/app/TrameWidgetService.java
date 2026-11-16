@@ -12,18 +12,20 @@ import java.util.List;
 public class TrameWidgetService extends RemoteViewsService {
     @Override
     public RemoteViewsFactory onGetViewFactory(Intent intent) {
-        return new Factory(getApplicationContext(), intent.getLongExtra("day", WidgetData.dayStart(0)));
+        return new Factory(getApplicationContext(), intent.getIntExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_ID, 0));
     }
 
     static final class Factory implements RemoteViewsFactory {
         private final Context ctx;
-        private final long day;
+        private final int widgetId;
         private List<WidgetData.Item> items = new ArrayList<>();
 
-        Factory(Context ctx, long day) { this.ctx = ctx; this.day = day; }
+        Factory(Context ctx, int widgetId) { this.ctx = ctx; this.widgetId = widgetId; }
 
         @Override public void onCreate() { }
-        @Override public void onDataSetChanged() { items = WidgetData.load(ctx).items(ctx, day); }
+        @Override public void onDataSetChanged() {
+            items = WidgetData.load(ctx).items(ctx, WidgetData.dayStart(TrameWidgetProvider.offset(ctx, widgetId)));
+        }
         @Override public void onDestroy() { items.clear(); }
         @Override public int getCount() { return items.size(); }
         @Override public RemoteViews getLoadingView() { return null; }

@@ -6,5 +6,8 @@
     <color name="w_muted">#FF9AA8B7</color>
     <color name="w_accent">#FF6EA8DC</color>
     <color name="w_on_accent">#FF0F151C</color>
+    <string name="w_prev">Jour précédent</string>
+    <string name="w_next">Jour suivant</string>
+    <string name="w_today">Auj.</string>
     <string name="widget_description">Rendez-vous et tâches du jour</string>
 </resources>

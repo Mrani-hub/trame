@@ -1,5 +1,5 @@
 {
-  "version": "0.5.1",
+  "version": "0.5.2",
   "apk": "https://github.com/Mrani-hub/trame/releases/latest/download/Trame.apk",
-  "notes": "Pont avec Google Keep : envoyer une note vers Keep, et recevoir dans Trame le texte partagé depuis Keep (ou une autre appli)."
+  "notes": "Widget : flèches plus grandes et réactives (changement de jour instantané), bouton « Auj. » pour revenir à aujourd'hui."
 }

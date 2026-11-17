@@ -1,5 +1,5 @@
 {
-  "version": "0.5.2",
+  "version": "0.6.0",
   "apk": "https://github.com/Mrani-hub/trame/releases/latest/download/Trame.apk",
-  "notes": "Widget : flèches plus grandes et réactives (changement de jour instantané), bouton « Auj. » pour revenir à aujourd'hui."
+  "notes": "Icônes : une icône par élément (rendez-vous, tâche, rappel, note), choisie à la main ou déduite du titre, et une icône par défaut pour chaque type — visibles dans l'appli, le widget et les notifications."
 }

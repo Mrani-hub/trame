@@ -46,7 +46,7 @@ public class TrameWidgetService extends RemoteViewsService {
             rv.setTextViewText(R.id.w_t1, it.t1);
             rv.setTextViewText(R.id.w_t2, it.t2);
             rv.setViewVisibility(R.id.w_t2, it.t2.isEmpty() ? View.GONE : View.VISIBLE);
-            rv.setTextViewText(R.id.w_name, it.type == 2 ? "○  " + it.title : it.title);
+            rv.setTextViewText(R.id.w_name, it.type == 2 && !it.title.isEmpty() && Character.isLetterOrDigit(it.title.codePointAt(0)) ? "○  " + it.title : it.title);
             rv.setTextViewText(R.id.w_info, it.info);
             rv.setViewVisibility(R.id.w_info, it.info.isEmpty() ? View.GONE : View.VISIBLE);
             rv.setInt(R.id.w_bar, "setBackgroundColor", it.color != 0 ? (it.color | 0xFF000000) : 0xFF6EA8DC);

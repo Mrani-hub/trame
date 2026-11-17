@@ -11,6 +11,7 @@ import {
 import {
   waNumber, findConflicts, conflictKeys, freeSlots, suggestPlacements, searchAll, buildContext, buildICS, seriesSig, noteText,
 } from './core/logic.js';
+import { resolveIcon, ICON_SET, DEFAULT_TYPE_ICONS } from './core/icons.js';
 import { makeBackup, readBackup, isEncrypted, makeShare, readShare } from './core/backup.js';
 import { noteToText, noteToPdf } from './export.js';
 import { occurrences, nextAfter, toNativeRule, ruleLabel, presets, presetIdOf, generationHorizon, normalizeRule } from './core/recurrence.js';
@@ -19,7 +20,7 @@ import { occurrences, nextAfter, toNativeRule, ruleLabel, presets, presetIdOf, g
 const DEFAULT_SETTINGS = {
   lang: 'fr', theme: 'auto', calMode: 'both', hijriOffset: 0, digits: 'latin', writeCal: '', hiddenCals: [],
   contextLead: 15, defaultDur: 60, dayStart: 8, dayEnd: 18, taskDueReminder: true, onboarded: false,
-  updateUrl: 'https://raw.githubusercontent.com/Mrani-hub/trame/main/version.json', voiceLang: 'auto', lastUpdateCheck: 0, birthdays: 'remind',
+  updateUrl: 'https://raw.githubusercontent.com/Mrani-hub/trame/main/version.json', voiceLang: 'auto', lastUpdateCheck: 0, birthdays: 'remind', autoIcons: true, typeIcons: true, iconDefaults: {},
 };
 const state = {
   data: { format: 1, tasks: [], notes: [], localEvents: [], eventMeta: {}, contacts: {}, series: {}, birthdays: [], settings: { ...DEFAULT_SETTINGS } },
@@ -92,10 +93,18 @@ async function ensureRange(from, to, force = false) {
     .map((e) => (bdCals.has(e.calendarId) || yearly.has(e.id) ? { ...e, birthday: true, allDay: true } : e));
   const bdShown = S().birthdays !== 'hide';
   state.events = [...dev.filter((e) => bdShown || !e.birthday), ...(bdShown ? contactBirthdayEvents(f, tt, dev.filter((e) => e.birthday)) : []), ...locals]
-    .map((e) => { const m = metaOf(e); return { ...e, color: m.color || e.color, ownColor: m.color || (e.source === 'local' ? e.color : '') || '', participants: m.participants || [], rule: e.repeat || m.rule || state.data.series[m.series]?.rule || null, seriesId: m.series || null, period: !!(e.period || m.period), periodStart: m.start || null }; })
+    .map((e) => { const m = metaOf(e); return { ...e, icon: m.icon ?? e.icon, color: m.color || e.color, ownColor: m.color || (e.source === 'local' ? e.color : '') || '', participants: m.participants || [], rule: e.repeat || m.rule || state.data.series[m.series]?.rule || null, seriesId: m.series || null, period: !!(e.period || m.period), periodStart: m.start || null }; })
     .sort((a, b) => a.start - b.start);
   state.range = [f, tt];
 }
+/** Titre sans emoji de tête (l'icône est affichée à part). */
+const bareTitle = (s) => String(s || '').replace(/^(?:\p{Extended_Pictographic}\uFE0F?(?:\u200D\p{Extended_Pictographic}\uFE0F?)*\s*)+/u, '');
+/** Icône d'un rendez-vous, d'une tâche / d'un rappel ou d'une note. */
+function evIcon(e) { return resolveIcon(e.icon, bareTitle(e.title), e.birthday ? 'birthday' : e.period ? 'period' : 'event', S()); }
+function taskIcon(x) { return resolveIcon(x.icon, x.title, x.isReminder ? 'reminder' : 'task', S()); }
+function noteIcon(n) { return resolveIcon(n.icon, n.title, 'note', S()); }
+const withIcon = (ic, title) => (ic ? `${ic} ${title}` : title);
+
 /** Méta-données Trame d'un rendez-vous (participants, règle, série), par occurrence puis par série. */
 function metaOf(e) {
   const M = state.data.eventMeta;
@@ -230,7 +239,7 @@ function eventRow(e, conf = new Set()) {
   const n = ctx.related.length + ctx.openTasks.length;
   return `<button class="row ev" data-act="event" data-key="${esc(e.key)}" style="--c:${esc(e.color || '#1F4E79')}">
     <div class="when">${e.allDay ? t('allDayShort') : `${D(fmtTime(e.start))}<small>${D(fmtTime(e.end))}${sameDay(e.start, e.end) ? '' : ` <sup>+${Math.round((startOfDay(e.end) - startOfDay(e.start)) / DAY)}</sup>`}</small>`}</div>
-    <div class="what"><b>${e.birthday && !/^🎂/.test(e.title || '') ? '🎂 ' : ''}${esc(e.title || t('untitled'))}${!e.period && (e.recurring || e.rule || e.seriesId) ? ` <span class="rep">${icon('repeat')}</span>` : ''}</b>${(() => { const p = e.period && periodInfo(e); const sub = [p ? D(t('dayOf', p.i, p.n)) : '', e.location || ''].filter(Boolean).join(' · '); return sub ? `<small>${esc(sub)}</small>` : ''; })()}</div>
+    <div class="what"><b>${(() => { const ic = evIcon(e); return ic ? `<span class="eic">${ic}</span>` : ''; })()}${esc(bareTitle(e.title) || t('untitled'))}${!e.period && (e.recurring || e.rule || e.seriesId) ? ` <span class="rep">${icon('repeat')}</span>` : ''}</b>${(() => { const p = e.period && periodInfo(e); const sub = [p ? D(t('dayOf', p.i, p.n)) : '', e.location || ''].filter(Boolean).join(' · '); return sub ? `<small>${esc(sub)}</small>` : ''; })()}</div>
     ${conf.has(e.key) ? `<span class="badge warn">${icon('warn')}</span>` : ''}${n ? `<span class="badge">${icon('link')}${D(n)}</span>` : ''}
   </button>`;
 }
@@ -250,7 +259,7 @@ function taskRow(x) {
   ].filter(Boolean).join(' · ');
   return `<div class="row task ${x.done ? 'done' : ''} ${x.priority === 'high' ? 'high' : ''}">
     <button class="tick" data-act="toggle" data-id="${x.id}" aria-label="${t('done')}">${x.done ? icon('check') : ''}</button>
-    <button class="what" data-act="task" data-id="${x.id}"><b>${esc(x.title)}${x.repeat ? ` <span class="rep">${icon('repeat')}</span>` : ''}</b>${meta ? `<small>${meta}</small>` : ''}</button>
+    <button class="what" data-act="task" data-id="${x.id}"><b>${(() => { const ic = taskIcon(x); return ic ? `<span class="eic">${ic}</span>` : ''; })()}${esc(x.title)}${x.repeat ? ` <span class="rep">${icon('repeat')}</span>` : ''}</b>${meta ? `<small>${meta}</small>` : ''}</button>
   </div>`;
 }
 
@@ -319,10 +328,10 @@ function monthView() {
     const chips = [
       ...evs.map((e) => {
         const col = e.birthday ? '#33B679' : normColor(e.color || calColor.get(e.calendarId)) || (e.source === 'local' ? '#0F766E' : '#1F4E79');
-        const title = e.birthday ? e.title.replace(/^🎂\s*/, '') : e.title || t('untitled');
-        return `<span class="mchip" dir="auto" style="--chip:${col};--chipfg:${inkFor(col)}">${e.birthday ? '<i>🎂</i>' : ''}${esc(title)}</span>`;
+        const title = bareTitle(e.title) || t('untitled'), ic = evIcon(e);
+        return `<span class="mchip" dir="auto" style="--chip:${col};--chipfg:${inkFor(col)}">${ic ? `<i>${ic}</i>` : ''}${esc(title)}</span>`;
       }),
-      ...tks.map((x) => `<span dir="auto" class="mchip task ${x.priority === 'high' ? 'high' : ''}">${x.isReminder ? '⏰' : '○'} ${esc(x.title)}</span>`),
+      ...tks.map((x) => `<span dir="auto" class="mchip task ${x.priority === 'high' ? 'high' : ''}">${taskIcon(x) || (x.isReminder ? '⏰' : '○')} ${esc(x.title)}</span>`),
     ];
     const more = chips.length > MAX ? chips.length - (MAX - 1) : 0;
     const shown = more ? chips.slice(0, MAX - 1) : chips;
@@ -335,6 +344,24 @@ function monthView() {
   return `<div class="month full"><div class="wd">${wd}</div><div class="mgrid" style="--rows:${cells.length / 7}">${cells.join('')}</div></div>
     <p class="hint center">${t('dblTapHint')}</p>${dayBlock(state.selDay)}`;
 }
+/** Grille de choix d'icône : Auto (déduite du titre / du type), Aucune, ou un emoji. */
+function iconGrid(current, act, autoPreview, extra = '') {
+  const cell = (v, label, cls = '') => `<button type="button" class="icell ${cls} ${current === v ? 'on' : ''}" data-act="${act}" data-v="${esc(v)}" ${extra}>${label}</button>`;
+  return `<div class="igrid">
+    <div class="irow">${cell('', `<span>${autoPreview || '✨'}</span><small>${t('iconAuto')}</small>`, 'wide')}${cell('none', `<span>∅</span><small>${t('iconNone')}</small>`, 'wide')}</div>
+    ${ICON_SET.map(([, list]) => `<div class="irow">${list.map((ic) => cell(ic, ic)).join('')}</div>`).join('')}
+  </div>`;
+}
+function iconField(d) {
+  const type = d.type === 'event' ? 'event' : d.type === 'reminder' ? 'reminder' : d.type === 'note' ? 'note' : 'task';
+  const auto = resolveIcon('', d.title || d.body || '', type, S());
+  const cur = d.icon === 'none' ? '∅' : d.icon || auto || '✨';
+  return `<div class="iconfield">
+    <button type="button" class="iconpick" data-act="icontoggle"><span class="big">${cur}</span><span>${t('icon')}${!d.icon ? ` <small>· ${t('iconAuto')}</small>` : ''}</span></button>
+    ${state.sheet.iconOpen ? iconGrid(d.icon || '', 'seticon', auto) : ''}
+  </div>`;
+}
+
 /** Couleurs proposées (palette de Google Agenda) ; '' = couleur de l'agenda d'origine. */
 const COLORS = [['', 'colAgenda'], ['#D50000', 'colTomato'], ['#E67C73', 'colFlamingo'], ['#F4511E', 'colTangerine'], ['#F6BF26', 'colBanana'], ['#33B679', 'colSage'],
   ['#0B8043', 'colBasil'], ['#039BE5', 'colPeacock'], ['#3F51B5', 'colBlueberry'], ['#7986CB', 'colLavender'], ['#8E24AA', 'colGrape'], ['#616161', 'colGraphite']];
@@ -383,7 +410,7 @@ function viewNotes() {
   return `<div class="seg"><button class="ghost" data-act="newnote">${icon('plus')} ${t('newNote')}</button>
     <button class="ghost" data-act="newmeeting">${icon('users')} ${t('newMeeting')}</button></div>
     ${l.length ? `<div class="cards">${l.map((n) => `<button class="card" data-act="note" data-id="${n.id}">
-      <b>${esc(n.title || t('untitled'))}</b>
+      <b>${(() => { const ic = noteIcon(n); return ic ? `<span class="eic">${ic}</span>` : ''; })()}${esc(n.title || t('untitled'))}</b>
       ${n.eventTitle ? `<small class="lnk">${icon('link')} ${esc(n.eventTitle)}${n.eventStart ? ' · ' + D(fmtDate(n.eventStart, { weekday: false })) : ''}</small>` : ''}
       <p>${esc(noteText(n).slice(0, 140))}</p>
       <small>${D(fmtDate(n.updated, { weekday: false }))}</small></button>`).join('')}</div>` : `<p class="empty">${t('emptyNotes')}</p>`}`;
@@ -493,6 +520,7 @@ function sheetEdit() {
       </div>
       <div class="two"><label>${t('remindAt')}<input type="date" name="remindDate" value="${d.remindAt ? ymd(d.remindAt) : ''}"></label>
       <label>&nbsp;<input type="time" name="remindTime" value="${d.remindAt ? hm(d.remindAt) : ''}"></label></div>` : ''}
+    ${iconField(d)}
     ${d.type !== 'note' && !(d.type === 'event' && d.multi) ? repeatBlock(d) : ''}
     ${d.warnings?.includes('defaultTime') ? `<p class="warnline">${icon('warn')} ${t('defaultTimeWarn')}</p>` : ''}
     <div class="actions">
@@ -614,6 +642,7 @@ async function saveEdit(draft = null) {
     const ev = { title: d.title, start, end, allDay: d.allDay, location: d.location };
     const rule = pRule ? normalizeRule(pRule, start) : d.multi ? null : d.repeat ? normalizeRule(d.repeat, start) : null;
     const color = d.color ?? null; // '' = couleur de l'agenda
+    const icn = d.icon || null;      // null = automatique
     // Rendez-vous répétitif existant : « cette occurrence » ou « toute la série » ?
     const isRec = d.existing && (d.existing.recurring || d.existing.seriesId);
     if (isRec && !d.scope) { state.sheet = { kind: 'editscope', draft: d, back: state.sheet }; renderSheet(); return; }
@@ -632,7 +661,7 @@ async function saveEdit(draft = null) {
         const base = state.data.localEvents.find((e) => e.id === d.existing.id);
         // une occurrence modifiée décale toute la série du même écart
         const delta = start - d.existing.start;
-        Object.assign(base, { title: ev.title, location: ev.location, allDay: ev.allDay, start: base.start + delta, end: base.start + delta + (end - start), repeat: rule, color: color || null });
+        Object.assign(base, { title: ev.title, location: ev.location, allDay: ev.allDay, start: base.start + delta, end: base.start + delta + (end - start), repeat: rule, color: color || null, icon: icn });
         key = `loc:${base.id}`;
       } else if (d.calendarId && d.calendarId !== 'local' && state.calPerm) {
         const native = toNativeRule(rule, start);
@@ -645,7 +674,7 @@ async function saveEdit(draft = null) {
         if (s.writeCal !== d.calendarId) s.writeCal = d.calendarId;
       } else {
         const id = uid('ev'); key = `loc:${id}`;
-        state.data.localEvents.push({ id, key, ...ev, repeat: rule, color: color || null, created: now });
+        state.data.localEvents.push({ id, key, ...ev, repeat: rule, color: color || null, icon: icn, created: now });
       }
       if (metaKeys.length && color) for (const k of metaKeys) { await P.setEventColor(k.slice(4), color); }
     } catch (e) { console.error(e); toast(String(e.message || e)); return; }
@@ -655,7 +684,7 @@ async function saveEdit(draft = null) {
       else state.data.eventMeta[key] = { ...(state.data.eventMeta[key] || {}), period: true, start, rule };
     }
     for (const k of metaKeys.length ? metaKeys : [key]) {
-      if (k && !k.startsWith('loc:')) state.data.eventMeta[k] = { ...(state.data.eventMeta[k] || {}), color: color || null };
+      if (k && !k.startsWith('loc:')) state.data.eventMeta[k] = { ...(state.data.eventMeta[k] || {}), color: color || null, icon: icn };
       if (d.participants?.length) state.data.eventMeta[k] = { ...(state.data.eventMeta[k] || {}), participants: d.participants };
     }
     if (d.sharedText && d.sharedText.trim() !== d.title.trim()) {
@@ -666,7 +695,7 @@ async function saveEdit(draft = null) {
     }
     invalidate();
   } else if (d.type === 'note') {
-    const n = { id: uid('n'), title: d.title || firstLine(d.body), body: d.body, created: now, updated: now, meeting: null };
+    const n = { id: uid('n'), title: d.title || firstLine(d.body), body: d.body, created: now, updated: now, meeting: null, icon: d.icon || undefined };
     state.data.notes.push(n);
   } else {
     const isRem = d.type === 'reminder';
@@ -675,7 +704,7 @@ async function saveEdit(draft = null) {
       title: d.title, isReminder: isRem, updated: now,
       due: !isRem && d.date ? parseYmd(d.date).getTime() : null,
       remindAt: isRem ? combine(d.date, d.time || '09:00') : d.remindAt || null,
-      durationMin: isRem ? null : d.durationMin || 30, priority: d.priority || 'normal', assignee: d.assignee || '',
+      durationMin: isRem ? null : d.durationMin || 30, priority: d.priority || 'normal', assignee: d.assignee || '', icon: d.icon || null,
       repeat: d.repeat ? normalizeRule(d.repeat, isRem ? combine(d.date, d.time || '09:00') : (d.date ? parseYmd(d.date).getTime() : Date.now())) : null,
     });
     if (x.repeat && !(x.due || x.remindAt)) x.due = startOfDay(new Date()).getTime();
@@ -695,10 +724,10 @@ async function saveRecurringEdit(d, ev, rule, color) {
     if (d.scope === 'this') {
       base.exdates = [...(base.exdates || []), x.start];
       const id = uid('ev');
-      state.data.localEvents.push({ id, key: `loc:${id}`, ...ev, repeat: null, color: color || base.color || null, created: Date.now() });
+      state.data.localEvents.push({ id, key: `loc:${id}`, ...ev, repeat: null, color: color || base.color || null, icon: d.icon || base.icon || null, created: Date.now() });
       return `loc:${id}`;
     }
-    Object.assign(base, { title: ev.title, location: ev.location, allDay: ev.allDay, start: base.start + shift, end: base.start + shift + duration, color: color || null,
+    Object.assign(base, { title: ev.title, location: ev.location, allDay: ev.allDay, start: base.start + shift, end: base.start + shift + duration, color: color || null, icon: d.icon || null,
       repeat: d.repTouched ? rule : base.repeat });
     return `loc:${base.id}`;
   }
@@ -820,7 +849,7 @@ function openTaskEditor(id) {
   openSheet({ kind: 'edit', draft: {
     type: x.isReminder ? 'reminder' : 'task', title: x.title, date: x.isReminder ? (x.remindAt ? ymd(x.remindAt) : '') : x.due ? ymd(x.due) : '',
     time: x.isReminder && x.remindAt ? hm(x.remindAt) : '', durationMin: x.durationMin || 30, priority: x.priority, assignee: x.assignee,
-    remindAt: x.isReminder ? null : x.remindAt, repeat: x.repeat || null, existing: { kind: 'task', id: x.id },
+    remindAt: x.isReminder ? null : x.remindAt, repeat: x.repeat || null, icon: x.icon || '', existing: { kind: 'task', id: x.id },
   } });
 }
 function openEventEditor(e) {
@@ -831,7 +860,7 @@ function openEventEditor(e) {
     multi: !!e.period || (e.allDay && e.end - e.start > DAY + 3600000),
     endDate: e.period && e.rule?.until ? ymd(e.rule.until) : e.allDay && e.end - e.start > DAY + 3600000 ? ymd(e.end - DAY) : '',
     workdays: !!(e.period && e.rule?.freq === 'weekly'),
-    color: e.ownColor || '',
+    color: e.ownColor || '', icon: e.icon || '',
     existing: { kind: 'event', source: e.source, id: e.id, key: e.key, recurring: e.recurring, seriesId: e.seriesId, start: e.start, rawStart: e.rawStart, color: e.ownColor || '' },
   } });
 }
@@ -844,7 +873,7 @@ function sheetEvent() {
   const why = { linked: 'whyLinked', series: 'whySeries', people: 'whyPeople', topic: 'whyTopic' };
   const cal = state.calendars.find((c) => c.id === e.calendarId);
   const people = [...(e.attendees || []).map((a) => a.name || a.email), ...(e.participants || [])];
-  return `<div class="sheet-head"><b>${esc(e.title || t('untitled'))}</b><button class="iconbtn" data-act="close" aria-label="${t('close')}">✕</button></div>
+  return `<div class="sheet-head"><b>${esc(withIcon(evIcon(e), bareTitle(e.title) || t('untitled')))}</b><button class="iconbtn" data-act="close" aria-label="${t('close')}">✕</button></div>
     <p class="meta">${D(esc(fmtDate(e.start, { year: true })))}<br>${e.allDay ? t('allDay') : `${D(fmtTime(e.start))} – ${D(fmtTime(e.end))}`}
       ${e.location ? `<br>${esc(e.location)}` : ''}<br><small>${esc(e.source === 'local' ? t('localCal') : cal?.title || '')}</small></p>
     ${e.period && periodInfo(e) ? (() => { const p = periodInfo(e); return `<p class="replabel">${icon('agenda')} ${esc(D(t('periodDay', p.i, p.n, dateLabel(new Date(p.from), { ...S(), calMode: 'greg' }, { weekday: false }), dateLabel(new Date(p.to), { ...S(), calMode: 'greg' }, { weekday: false }))))}</p>`; })() : ''}
@@ -890,7 +919,9 @@ function sheetNote() {
       <b>${m ? t('meetingNote') : t('typeNote')}</b>
       <button class="iconbtn" data-act="noteshare" aria-label="${t('share')}">${icon('share')}</button></div>
     <div class="form" id="noteForm">
-      <input class="title-in" name="title" value="${esc(n.title)}" placeholder="${esc(t('noteTitlePh'))}">
+      <div class="note-title-row"><button type="button" class="iconpick sm" data-act="noteicontoggle"><span class="big">${n.icon === 'none' ? '∅' : noteIcon(n) || '✨'}</span></button>
+      <input class="title-in" name="title" value="${esc(n.title)}" placeholder="${esc(t('noteTitlePh'))}"></div>
+      ${state.sheet.iconOpen ? iconGrid(n.icon || '', 'setnoteicon', resolveIcon('', n.title, 'note', S())) : ''}
       <label>${t('linkedEvent')}<select name="eventKey"><option value="">${t('none')}</option>
         ${n.eventKey && !around.find((e) => e.key === n.eventKey) ? `<option value="${esc(n.eventKey)}" selected>${esc(n.eventTitle)} · ${D(fmtDate(n.eventStart, { weekday: false }))}</option>` : ''}
         ${around.map((e) => `<option value="${esc(e.key)}" ${n.eventKey === e.key ? 'selected' : ''}>${D(fmtDate(e.start, { weekday: false }))} ${e.allDay ? '' : D(fmtTime(e.start))} · ${esc(e.title)}</option>`).join('')}
@@ -992,6 +1023,12 @@ function sheetSettings() {
     <div class="two"><label>${t('sDayHours')}<select data-set="dayStart" data-num="1">${[6, 7, 8, 9, 10].map((h) => opt(h, s.dayStart, D(h + ':00'))).join('')}</select></label>
       <label>&nbsp;<select data-set="dayEnd" data-num="1">${[15, 16, 17, 18, 19, 20].map((h) => opt(h, s.dayEnd, D(h + ':00'))).join('')}</select></label></div>
     ${P.platform === 'android' ? `<p class="hint">${t('widgetHint')}</p>` : ''}
+    <h3>${t('sIcons')}</h3>
+    <label class="check"><input type="checkbox" data-set="autoIcons" ${s.autoIcons !== false ? 'checked' : ''}> ${t('iconAutoSet')}</label>
+    <label class="check"><input type="checkbox" data-set="typeIcons" ${s.typeIcons !== false ? 'checked' : ''}> ${t('iconTypeSet')}</label>
+    ${s.typeIcons !== false ? `<div class="deficons">${Object.keys(DEFAULT_TYPE_ICONS).map((k) => `<button type="button" class="chip ${state.defIconOpen === k ? 'on' : ''}" data-act="deficontoggle" data-type="${k}"><span class="big">${resolveIcon('', '', k, { ...s, autoIcons: false }) || '∅'}</span> ${t('it_' + k)}</button>`).join('')}</div>
+      ${state.defIconOpen ? iconGrid(s.iconDefaults?.[state.defIconOpen] ?? '', 'setdeficon', DEFAULT_TYPE_ICONS[state.defIconOpen]) : ''}` : ''}
+    <p class="hint">${t('iconHint')}</p>
     <h3>🎂 ${t('sBirthdays')}</h3>
     <label>${t('sBirthdaysMode')}<select data-set="birthdays">${opt('remind', s.birthdays, t('bdRemind'))}${opt('show', s.birthdays, t('bdShow'))}${opt('hide', s.birthdays, t('bdHide'))}</select></label>
     ${P.native ? `<div class="actions wrap"><button class="btn ghost" data-act="bdimport">${icon('contacts')} ${t('bdImport')}</button><small>${state.data.birthdays?.length ? D(t('bdCount', state.data.birthdays.length)) : ''}</small></div>` : ''}
@@ -1017,6 +1054,7 @@ async function applySetting(el) {
   if (k === 'hijriOffset' || k === 'calMode') state.monthCal = null;
   persist();
   if (k === 'theme') applyTheme();
+  if (k === 'autoIcons' || k === 'typeIcons') { renderSheet(); pushWidget(); }
   if (k === 'birthdays') { invalidate(); pushWidget(); rescheduleNotifs(); }
   if (k === 'lang' || k === 'calMode' || k === 'hijriOffset' || k === 'digits') { setLang(S().lang); renderSheet(); }
   render();
@@ -1062,7 +1100,7 @@ function eventMessage(e) {
   const s = S(), ar = s.lang === 'ar';
   const people = [...new Set([...(e.attendees || []).map((a) => a.name || a.email), ...(e.participants || [])])].filter(Boolean);
   return [
-    `📅 *${e.title || t('untitled')}*`,
+    `${evIcon(e) || '📅'} *${bareTitle(e.title) || t('untitled')}*`,
     `🗓 ${dateLabel(new Date(e.start), { ...s, calMode: s.calMode === 'greg' ? 'greg' : 'both' }, { year: true })}`,
     `🕘 ${e.allDay ? t('allDay') : `${fmtTime(e.start)} – ${fmtTime(e.end)}`}`,
     e.location ? `📍 ${e.location}` : null,
@@ -1143,17 +1181,27 @@ async function sendWhatsApp() {
 }
 
 // ——— Widget ———
-function pushWidget() {
+async function pushWidget() {
   if (P.platform !== 'android') return;
   const s = S(), from = startOfDay(new Date()).getTime() - 7 * DAY;
+  // icônes des rendez-vous de l'agenda du téléphone (le widget les lit directement : on lui donne l'icône par identifiant)
+  const icons = {};
+  if (state.calPerm) {
+    const yearly = await P.yearlyAllDayIds(from, from + 75 * DAY);
+    for (const e of (await P.listDeviceEvents(from, from + 75 * DAY)) || []) {
+      const m = metaOf(e);
+      icons[e.id] = evIcon({ ...e, icon: m.icon, period: m.period, birthday: yearly.has(e.id) });
+    }
+  }
   P.updateWidget({
+    icons, evIcon: resolveIcon('', '', 'event', { ...s, autoIcons: false }),
     v: 1, lang: s.lang, calMode: s.calMode, birthdays: s.birthdays, hijriOffset: s.hijriOffset, digits: s.digits,
     hiddenCals: s.birthdays === 'hide' ? [...s.hiddenCals, ...state.calendars.filter((c) => c.birthday).map((c) => c.id)] : s.hiddenCals,
     calPerm: state.calPerm,
     colors: Object.fromEntries(Object.entries(state.data.eventMeta).filter(([k, m]) => m.color && k.startsWith('cal:')).map(([k, m]) => [k.slice(4).split('@')[0], m.color])),
-    localEvents: [...expandLocal(from, from + 130 * DAY), ...(s.birthdays === 'hide' ? [] : contactBirthdayEvents(from, from + 130 * DAY, []))].map((e) => ({ id: e.id, title: e.title, start: e.start, end: e.end, allDay: !!e.allDay, location: e.location || '', color: e.color || '' })),
+    localEvents: [...expandLocal(from, from + 130 * DAY), ...(s.birthdays === 'hide' ? [] : contactBirthdayEvents(from, from + 130 * DAY, []))].map((e) => ({ id: e.id, title: withIcon(evIcon(e), bareTitle(e.title)), start: e.start, end: e.end, allDay: !!e.allDay, location: e.location || '', color: e.color || '' })),
     tasks: state.data.tasks.filter((x) => !x.done && (x.due || x.remindAt || x.plannedStart)).map((x) => ({
-      id: x.id, title: x.title, high: x.priority === 'high', reminder: !!x.isReminder,
+      id: x.id, title: x.title, icon: taskIcon(x), high: x.priority === 'high', reminder: !!x.isReminder,
       due: x.due || null, remindAt: x.remindAt || null, plannedStart: x.plannedStart || null, durationMin: x.durationMin || null,
     })),
   });
@@ -1199,9 +1247,9 @@ async function rescheduleNotifs() {
   const s = S(), items = [];
   for (const x of state.data.tasks) {
     if (x.done) continue;
-    if (x.remindAt) items.push({ ref: 'r:' + x.id, at: x.remindAt, title: (x.isReminder ? '' : t('notifTask') + ' · ') + x.title, body: x.assignee || '', extra: { kind: 'task', id: x.id } });
-    else if (s.taskDueReminder && x.due) items.push({ ref: 'd:' + x.id, at: x.due + 9 * 3600000, title: `${t('due')} · ${x.title}`, body: x.assignee || '', extra: { kind: 'task', id: x.id } });
-    if (x.plannedStart) items.push({ ref: 'p:' + x.id, at: x.plannedStart, title: `${t('notifPlanned')} · ${x.title}`, extra: { kind: 'task', id: x.id } });
+    if (x.remindAt) items.push({ ref: 'r:' + x.id, at: x.remindAt, title: withIcon(taskIcon(x), (x.isReminder ? '' : t('notifTask') + ' · ') + x.title), body: x.assignee || '', extra: { kind: 'task', id: x.id } });
+    else if (s.taskDueReminder && x.due) items.push({ ref: 'd:' + x.id, at: x.due + 9 * 3600000, title: withIcon(taskIcon(x), `${t('due')} · ${x.title}`), body: x.assignee || '', extra: { kind: 'task', id: x.id } });
+    if (x.plannedStart) items.push({ ref: 'p:' + x.id, at: x.plannedStart, title: withIcon(taskIcon(x), `${t('notifPlanned')} · ${x.title}`), extra: { kind: 'task', id: x.id } });
   }
   if (s.contextLead > 0) {
     const from = Date.now(), to = from + 7 * DAY;
@@ -1212,7 +1260,7 @@ async function rescheduleNotifs() {
       if (e.birthday) continue;
       const ctx = buildContext({ ...e, participants: metaOf(e).participants || [] }, state.data);
       items.push({
-        ref: 'e:' + e.key, at: e.start - s.contextLead * MIN, title: `${t('notifEvent', s.contextLead)} · ${e.title}`,
+        ref: 'e:' + e.key, at: e.start - s.contextLead * MIN, title: withIcon(evIcon({ ...e, icon: metaOf(e).icon ?? e.icon }), `${t('notifEvent', s.contextLead)} · ${bareTitle(e.title)}`),
         body: t('notifCtx', ctx.related.length, ctx.openTasks.length), extra: { kind: 'event', key: e.key, start: e.start },
       });
     }
@@ -1328,6 +1376,17 @@ const actions = {
   evedit: () => openEventEditor(state.sheet.ev),
   scope: (b) => { const d = state.sheet.draft; d.scope = b.dataset.scope; state.sheet = state.sheet.back; saveEdit(d); },
   scopeback: () => { state.sheet = state.sheet.back; renderSheet(); },
+  icontoggle: () => { readEditForm(); state.sheet.iconOpen = !state.sheet.iconOpen; renderSheet(); },
+  seticon: (b) => { readEditForm(); state.sheet.draft.icon = b.dataset.v; state.sheet.iconOpen = false; renderSheet(); },
+  noteicontoggle: () => { syncNoteFromDom(); state.sheet.iconOpen = !state.sheet.iconOpen; renderSheet(); },
+  setnoteicon: (b) => { syncNoteFromDom(); state.sheet.note.icon = b.dataset.v || undefined; state.sheet.iconOpen = false; renderSheet(); },
+  deficontoggle: (b) => { state.defIconOpen = state.defIconOpen === b.dataset.type ? null : b.dataset.type; renderSheet(); },
+  setdeficon: (b) => {
+    const s = S(), type = state.defIconOpen;
+    s.iconDefaults = { ...(s.iconDefaults || {}) };
+    if (b.dataset.v) s.iconDefaults[type] = b.dataset.v === 'none' ? '' : b.dataset.v; else delete s.iconDefaults[type];
+    state.defIconOpen = null; persist(); renderSheet(); render();
+  },
   pickcolor: (b) => { const f = $('#editForm'); if (!f) return; state.sheet.draft.color = b.dataset.c; $$('.swatch', f).forEach((x) => x.classList.toggle('on', x === b)); },
   delrep: (b) => deleteRecurring(state.sheet.ev, b.dataset.scope),
   decadd: () => { syncNoteFromDom(); state.sheet.note.meeting.decisions.push(''); renderSheet(); $$('[data-dec]').pop()?.focus(); },

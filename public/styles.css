@@ -235,3 +235,22 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; }
 .swatch { width: 30px; height: 30px; border-radius: 50%; background: var(--sw); border: 2px solid var(--card); box-shadow: 0 0 0 1px var(--line);
   display: grid; place-items: center; font-size: 12px; font-weight: 700; color: var(--muted); }
 .swatch.on { box-shadow: 0 0 0 2px var(--ink); }
+
+/* Icônes */
+.eic { margin-inline-end: 6px; font-weight: 400; }
+.iconfield { display: flex; flex-direction: column; gap: 8px; }
+.iconpick { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--ink); font-size: 15px; }
+.iconpick .big, .chip .big { font-size: 22px; line-height: 1; }
+.iconpick small { color: var(--muted); }
+.iconpick.sm { padding: 4px 8px; border-radius: 10px; flex: none; }
+.note-title-row { display: flex; align-items: center; gap: 8px; }
+.note-title-row .title-in { flex: 1; min-width: 0; }
+.igrid { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 12px; padding: 8px; max-height: 300px; overflow-y: auto; }
+.irow { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.irow:last-child { border-bottom: 0; padding-bottom: 0; }
+.icell { width: 42px; height: 42px; display: grid; place-items: center; font-size: 22px; border-radius: 10px; }
+.icell.wide { width: auto; padding: 0 12px; display: flex; gap: 6px; font-size: 20px; border: 1px solid var(--line); }
+.icell.wide small { font-size: 13px; color: var(--muted); }
+.icell.on { background: color-mix(in srgb, var(--navy) 18%, transparent); outline: 2px solid var(--navy); }
+.deficons { display: flex; flex-wrap: wrap; gap: 6px; }
+.deficons .chip.on { outline: 2px solid var(--navy); }

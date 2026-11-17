@@ -43,7 +43,8 @@ final class WidgetData {
     boolean arabDigits = false;
     Set<String> hidden = new HashSet<>();
     JSONArray localEvents = new JSONArray(), tasks = new JSONArray();
-    JSONObject colors = new JSONObject();
+    JSONObject colors = new JSONObject(), icons = new JSONObject();
+    String evIcon = "";
 
     static WidgetData load(Context c) {
         WidgetData d = new WidgetData();
@@ -66,6 +67,8 @@ final class WidgetData {
                 if (j.optJSONArray("localEvents") != null) d.localEvents = j.optJSONArray("localEvents");
                 if (j.optJSONArray("tasks") != null) d.tasks = j.optJSONArray("tasks");
                 if (j.optJSONObject("colors") != null) d.colors = j.optJSONObject("colors");
+                if (j.optJSONObject("icons") != null) d.icons = j.optJSONObject("icons");
+                d.evIcon = j.optString("evIcon", "");
             } else {
                 d.lang = Locale.getDefault().getLanguage().equals("ar") ? "ar" : "fr";
             }
@@ -166,7 +169,8 @@ final class WidgetData {
                     boolean inDay = allDay ? (s <= utcDay && e > utcDay) : (s >= day && s < end); // le jour de début fait foi
                     if (!inDay) continue;
                     Item it = new Item();
-                    it.type = 1; it.id = String.valueOf(cur.getLong(0)); it.title = (bday ? "🎂 " : "") + nz(cur.getString(1)); it.start = s; it.end = e;
+                    it.type = 1; it.id = String.valueOf(cur.getLong(0)); String ic = icons.has(it.id) ? icons.optString(it.id, "") : (bday ? "🎂" : evIcon);
+                    it.title = (ic.isEmpty() ? "" : ic + " ") + nz(cur.getString(1)); it.start = s; it.end = e;
                     it.allDay = allDay; it.info = nz(cur.getString(6)); it.color = parseColor(colors.optString(it.id, ""), cur.getInt(7));
                     events.add(it);
                 }
@@ -202,7 +206,9 @@ final class WidgetData {
             boolean late = isToday && due > 0 && due < day;
             if (!(dueToday || remToday || planToday || late)) continue;
             Item it = new Item();
-            it.type = 2; it.id = o.optString("id"); it.title = o.optString("title"); it.high = o.optBoolean("high");
+            it.type = 2; it.id = o.optString("id"); it.high = o.optBoolean("high");
+            String tic = o.optString("icon", "");
+            it.title = (tic.isEmpty() ? "" : tic + "  ") + o.optString("title");
             long when = planToday ? plan : remToday ? rem : 0;
             it.start = when > 0 ? when : (late ? 0 : day + DAY - 1);
             it.t1 = when > 0 ? hm(when) : "";

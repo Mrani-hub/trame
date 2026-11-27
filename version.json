@@ -1,5 +1,5 @@
 {
-  "version": "0.7.0",
+  "version": "0.7.1",
   "apk": "https://github.com/Mrani-hub/trame/releases/latest/download/Trame.apk",
-  "notes": "Interrompre un rendez-vous en cours : il se termine à l'heure réelle, avec motif et trace dans les notes ; possibilité d'arrêter aussi les jours restants d'une période ou les occurrences suivantes d'une série."
+  "notes": "Correction : l'interruption d'un rendez-vous répétitif ou d'une période de l'agenda Google échouait (« Exceptions can't overwrite dtend »)."
 }

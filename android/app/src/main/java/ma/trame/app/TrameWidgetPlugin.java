@@ -98,13 +98,16 @@ public class TrameWidgetPlugin extends Plugin {
             if (call.getString("title") != null) v.put(CalendarContract.Events.TITLE, call.getString("title"));
             if (call.getString("location") != null) v.put(CalendarContract.Events.EVENT_LOCATION, call.getString("location"));
             v.put(CalendarContract.Events.ALL_DAY, allDay ? 1 : 0);
+            // Android refuse DTEND dans une exception de série (« Exceptions can't overwrite dtend ») :
+            // la fin s'exprime par une DURÉE à partir du nouveau début.
             if (allDay) {
+                long days = Math.max(1, Math.round((utcMidnight(end - 60000L) + 86400000L - utcMidnight(start)) / 86400000.0));
                 v.put(CalendarContract.Events.DTSTART, utcMidnight(start));
-                v.put(CalendarContract.Events.DTEND, utcMidnight(end - 60000L) + 86400000L);
+                v.put(CalendarContract.Events.DURATION, "P" + days + "D");
                 v.put(CalendarContract.Events.EVENT_TIMEZONE, "UTC");
             } else {
                 v.put(CalendarContract.Events.DTSTART, start);
-                v.put(CalendarContract.Events.DTEND, end);
+                v.put(CalendarContract.Events.DURATION, "P" + Math.max(60L, (end - start) / 1000L) + "S");
                 v.put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().getID());
             }
             putColor(v, call.getString("color"));

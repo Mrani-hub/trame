@@ -812,8 +812,14 @@ async function doInterrupt() {
         ser.ids = ser.ids.filter((i) => !later.includes(i));
       }
     } else if (e.recurring) {
-      if (newEnd) await P.modifyOccurrence({ ...e, end: newEnd }, e.rawStart ?? e.start, null);
-      else await P.deleteDeviceEvent(e, 'this');
+      if (newEnd) {
+        try { await P.modifyOccurrence({ ...e, end: newEnd }, e.rawStart ?? e.start, null); }
+        catch (err) { // repli : l'occurrence est retirée de la série et recréée seule avec l'heure réelle de fin
+          console.warn('exception', err);
+          await P.deleteDeviceEvent(e, 'this');
+          await P.createDeviceEvent({ title: e.title, start: e.start, end: newEnd, allDay: false, location: e.location }, e.calendarId, 0, null);
+        }
+      } else await P.deleteDeviceEvent(e, 'this');
       if (future) await P.endDeviceSeries(e.id, todayEnd);
     } else if (newEnd) {
       await P.modifyDeviceEvent({ ...e, end: newEnd });

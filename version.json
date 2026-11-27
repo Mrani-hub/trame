@@ -1,5 +1,5 @@
 {
-  "version": "0.6.0",
+  "version": "0.7.0",
   "apk": "https://github.com/Mrani-hub/trame/releases/latest/download/Trame.apk",
-  "notes": "Icônes : une icône par élément (rendez-vous, tâche, rappel, note), choisie à la main ou déduite du titre, et une icône par défaut pour chaque type — visibles dans l'appli, le widget et les notifications."
+  "notes": "Interrompre un rendez-vous en cours : il se termine à l'heure réelle, avec motif et trace dans les notes ; possibilité d'arrêter aussi les jours restants d'une période ou les occurrences suivantes d'une série."
 }

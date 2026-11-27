@@ -93,7 +93,7 @@ async function ensureRange(from, to, force = false) {
     .map((e) => (bdCals.has(e.calendarId) || yearly.has(e.id) ? { ...e, birthday: true, allDay: true } : e));
   const bdShown = S().birthdays !== 'hide';
   state.events = [...dev.filter((e) => bdShown || !e.birthday), ...(bdShown ? contactBirthdayEvents(f, tt, dev.filter((e) => e.birthday)) : []), ...locals]
-    .map((e) => { const m = metaOf(e); return { ...e, icon: m.icon ?? e.icon, color: m.color || e.color, ownColor: m.color || (e.source === 'local' ? e.color : '') || '', participants: m.participants || [], rule: e.repeat || m.rule || state.data.series[m.series]?.rule || null, seriesId: m.series || null, period: !!(e.period || m.period), periodStart: m.start || null }; })
+    .map((e) => { const m = metaOf(e); return { ...e, interrupted: m.interrupted || e.interrupted || null, icon: m.icon ?? e.icon, color: m.color || e.color, ownColor: m.color || (e.source === 'local' ? e.color : '') || '', participants: m.participants || [], rule: e.repeat || m.rule || state.data.series[m.series]?.rule || null, seriesId: m.series || null, period: !!(e.period || m.period), periodStart: m.start || null }; })
     .sort((a, b) => a.start - b.start);
   state.range = [f, tt];
 }
@@ -239,7 +239,7 @@ function eventRow(e, conf = new Set()) {
   const n = ctx.related.length + ctx.openTasks.length;
   return `<button class="row ev" data-act="event" data-key="${esc(e.key)}" style="--c:${esc(e.color || '#1F4E79')}">
     <div class="when">${e.allDay ? t('allDayShort') : `${D(fmtTime(e.start))}<small>${D(fmtTime(e.end))}${sameDay(e.start, e.end) ? '' : ` <sup>+${Math.round((startOfDay(e.end) - startOfDay(e.start)) / DAY)}</sup>`}</small>`}</div>
-    <div class="what"><b>${(() => { const ic = evIcon(e); return ic ? `<span class="eic">${ic}</span>` : ''; })()}${esc(bareTitle(e.title) || t('untitled'))}${!e.period && (e.recurring || e.rule || e.seriesId) ? ` <span class="rep">${icon('repeat')}</span>` : ''}</b>${(() => { const p = e.period && periodInfo(e); const sub = [p ? D(t('dayOf', p.i, p.n)) : '', e.location || ''].filter(Boolean).join(' · '); return sub ? `<small>${esc(sub)}</small>` : ''; })()}</div>
+    <div class="what"><b>${(() => { const ic = evIcon(e); return ic ? `<span class="eic">${ic}</span>` : ''; })()}${esc(bareTitle(e.title) || t('untitled'))}${!e.period && (e.recurring || e.rule || e.seriesId) ? ` <span class="rep">${icon('repeat')}</span>` : ''}</b>${(() => { const p = e.period && periodInfo(e); const sub = [e.interrupted ? `⏹ ${D(t('interruptedAt', fmtTime(e.interrupted.at)))}` : '', p ? D(t('dayOf', p.i, p.n)) : '', e.location || ''].filter(Boolean).join(' · '); return sub ? `<small>${esc(sub)}</small>` : ''; })()}</div>
     ${conf.has(e.key) ? `<span class="badge warn">${icon('warn')}</span>` : ''}${n ? `<span class="badge">${icon('link')}${D(n)}</span>` : ''}
   </button>`;
 }
@@ -448,7 +448,7 @@ function closeSheet() {
 function renderSheet() {
   const s = state.sheet, el = $('#sheet');
   if (!s) { el.innerHTML = ''; el.className = ''; return; }
-  const renderers = { editscope: sheetEditScope, delrep: sheetDelRep, wa: sheetWhatsApp, edit: sheetEdit, event: sheetEvent, note: sheetNote, settings: sheetSettings, review: sheetReview, welcome: sheetWelcome };
+  const renderers = { interrupt: sheetInterrupt, editscope: sheetEditScope, delrep: sheetDelRep, wa: sheetWhatsApp, edit: sheetEdit, event: sheetEvent, note: sheetNote, settings: sheetSettings, review: sheetReview, welcome: sheetWelcome };
   el.className = 'open' + (s.kind === 'note' ? ' full' : '');
   el.innerHTML = `<div class="scrim" data-act="close"></div><div class="panel" role="dialog">${renderers[s.kind]()}</div>`;
   if (s.kind === 'edit') updateEditDerived();
@@ -757,6 +757,85 @@ function rruleString(r) {
   else if (r.end) { const u = new Date(r.end); parts.push(`UNTIL=${u.getUTCFullYear()}${String(u.getUTCMonth() + 1).padStart(2, '0')}${String(u.getUTCDate()).padStart(2, '0')}T235959Z`); }
   return parts.join(';');
 }
+// ——— Interrompre un rendez-vous en cours ———
+/** Un rendez-vous peut être interrompu s'il a commencé et n'est pas terminé, ou s'il fait partie d'une période / série en cours. */
+function canInterrupt(e) {
+  if (e.birthday || e.source === 'birthday' || e.interrupted) return false;
+  const now = Date.now();
+  if (e.start <= now && now < e.end) return true;
+  return !!(e.period || e.recurring || e.seriesId) && sameDay(e.start, now) && e.start <= now + 12 * 3600000;
+}
+function sheetInterrupt() {
+  const e = state.sheet.ev, now = Date.now();
+  const multi = !!(e.period || e.recurring || e.seriesId);
+  const ongoing = e.start <= now && now < e.end;
+  return `<div class="sheet-head"><b>⏹ ${t('interruptTitle')}</b><button class="iconbtn" data-act="intback">✕</button></div>
+    <p class="meta">${esc(withIcon(evIcon(e), bareTitle(e.title)))}<br>${e.allDay ? t('allDay') : `${D(fmtTime(e.start))} – ${D(fmtTime(e.end))}`}</p>
+    <div class="form" id="intForm">
+      ${ongoing || e.allDay ? `<p class="hint">${esc(D(t('interruptHint', fmtTime(now))))}</p>` : `<p class="hint">${t('interruptNotStarted')}</p>`}
+      ${multi ? `<label class="check"><input type="checkbox" name="future" ${e.period ? 'checked' : ''}> ${e.period ? t('interruptPeriod') : t('interruptSeries')}</label>` : ''}
+      <label>${t('interruptReason')}<input name="reason" placeholder="${esc(t('interruptReasonPh'))}"></label>
+      <label class="check"><input type="checkbox" name="note" checked> ${t('interruptNote')}</label>
+      <div class="actions"><button type="button" class="btn ghost" data-act="intback">${t('cancel')}</button>
+      <button type="button" class="btn stop" data-act="intdo">⏹ ${t('interruptConfirm')}</button></div>
+    </div>`;
+}
+async function doInterrupt() {
+  const e = state.sheet.ev, f = $('#intForm');
+  const future = !!f.querySelector('[name=future]')?.checked;
+  const reason = f.querySelector('[name=reason]').value.trim();
+  const withNote = f.querySelector('[name=note]').checked;
+  const now = Math.floor(Date.now() / MIN) * MIN;
+  const ongoing = e.start <= now && now < e.end;
+  // fin de cette occurrence : maintenant si elle a commencé, sinon elle est annulée (supprimée)
+  const newEnd = ongoing ? Math.max(now, e.start + MIN) : null;
+  const todayEnd = endOfDay(new Date()).getTime();
+  const mark = { at: now, reason };
+  try {
+    if (e.source === 'local') {
+      const base = state.data.localEvents.find((x) => x.id === e.id);
+      if (!e.recurring) {
+        if (newEnd) Object.assign(base, { end: newEnd, interrupted: mark }); else state.data.localEvents = state.data.localEvents.filter((x) => x !== base);
+      } else {
+        base.exdates = [...(base.exdates || []), e.start];
+        const nid = uid('ev');
+        if (newEnd) state.data.localEvents.push({ id: nid, key: `loc:${nid}`, ...stripLocal(base), start: e.start, end: newEnd, repeat: null, exdates: [], interrupted: mark, period: false, created: Date.now() });
+        if (future) base.repeat = { ...base.repeat, until: startOfDay(new Date()).getTime(), count: null };
+      }
+    } else if (e.seriesId && state.data.series[e.seriesId]) {
+      const ser = state.data.series[e.seriesId];
+      if (newEnd) await P.modifySeries(e.id, { title: e.title, location: e.location, shift: 0, duration: newEnd - e.start, allDay: false, single: true });
+      else { await P.deleteDeviceEventsById([e.id]); ser.ids = ser.ids.filter((i) => i !== e.id); }
+      if (future) {
+        const later = ((await P.listDeviceEvents(todayEnd, todayEnd + 6 * 366 * DAY)) || []).filter((x) => ser.ids.includes(x.id)).map((x) => x.id);
+        await P.deleteDeviceEventsById(later);
+        ser.ids = ser.ids.filter((i) => !later.includes(i));
+      }
+    } else if (e.recurring) {
+      if (newEnd) await P.modifyOccurrence({ ...e, end: newEnd }, e.rawStart ?? e.start, null);
+      else await P.deleteDeviceEvent(e, 'this');
+      if (future) await P.endDeviceSeries(e.id, todayEnd);
+    } else if (newEnd) {
+      await P.modifyDeviceEvent({ ...e, end: newEnd });
+    } else await P.deleteDeviceEvent(e, 'this');
+  } catch (err) { toast(String(err.message || err)); return; }
+  if (e.source !== 'local' || e.recurring) {
+    const k = e.source === 'local' ? null : e.recurring ? `cal:${e.id}@${e.start}` : `cal:${e.id}`;
+    if (k) state.data.eventMeta[k] = { ...(state.data.eventMeta[k] || {}), interrupted: mark };
+  }
+  if (withNote) {
+    const n = { id: uid('n'), title: `${t('interruptNoteTitle')} : ${bareTitle(e.title)}`, created: Date.now(), updated: Date.now(), meeting: null, icon: '⏹',
+      body: [D(t('interruptedAt', fmtTime(now))) + ` (${fmtDate(now, { weekday: true })})`, reason ? `${t('interruptReason')} : ${reason}` : '',
+        future ? (e.period ? t('interruptPeriod') : t('interruptSeries')) : ''].filter(Boolean).join('\n') };
+    linkNote(n, e);
+    state.data.notes.push(n);
+  }
+  invalidate(); persist(); state.sheet = null; renderSheet(); await render(); pushWidget();
+  toast(newEnd ? D(t('interruptedAt', fmtTime(now))) : t('interruptCancelled'));
+}
+/** Copie d'un rendez-vous local sans ses champs de série. */
+function stripLocal(b) { const { id, key, repeat, exdates, created, ...rest } = b; return rest; }
+
 function sheetEditScope() {
   const d = state.sheet.draft;
   return `<div class="sheet-head"><b>${t('editRepTitle')}</b><button class="iconbtn" data-act="scopeback">✕</button></div>
@@ -876,6 +955,7 @@ function sheetEvent() {
   return `<div class="sheet-head"><b>${esc(withIcon(evIcon(e), bareTitle(e.title) || t('untitled')))}</b><button class="iconbtn" data-act="close" aria-label="${t('close')}">✕</button></div>
     <p class="meta">${D(esc(fmtDate(e.start, { year: true })))}<br>${e.allDay ? t('allDay') : `${D(fmtTime(e.start))} – ${D(fmtTime(e.end))}`}
       ${e.location ? `<br>${esc(e.location)}` : ''}<br><small>${esc(e.source === 'local' ? t('localCal') : cal?.title || '')}</small></p>
+    ${e.interrupted ? `<p class="stopped">⏹ ${esc(D(t('interruptedAt', fmtTime(e.interrupted.at))))}${e.interrupted.reason ? ` — ${esc(e.interrupted.reason)}` : ''}</p>` : ''}
     ${e.period && periodInfo(e) ? (() => { const p = periodInfo(e); return `<p class="replabel">${icon('agenda')} ${esc(D(t('periodDay', p.i, p.n, dateLabel(new Date(p.from), { ...S(), calMode: 'greg' }, { weekday: false }), dateLabel(new Date(p.to), { ...S(), calMode: 'greg' }, { weekday: false }))))}</p>`; })() : ''}
     ${!e.period && (e.rule || e.recurring) ? `<p class="replabel">${icon('repeat')} ${esc(e.rule ? D(ruleLabel(e.rule, e.seriesStart || state.data.series[e.seriesId]?.start || e.start, S().lang, S().hijriOffset)) : t('repeating'))}</p>` : ''}
     ${people.length ? `<p class="meta">${icon('users')} ${esc(people.join(', '))}</p>` : ''}
@@ -888,6 +968,7 @@ function sheetEvent() {
       <div class="what"><b>${esc(r.note.title || t('untitled'))}</b><small>${r.why.map((w) => t(why[w])).join(' · ')} · ${D(fmtDate(r.note.updated, { weekday: false }))}</small></div></button>`).join('')}</div>` : ''}
     <div class="actions wrap">
       ${e.birthday ? '' : `<button class="btn primary" data-act="evnote">${icon('users')} ${t('newMeeting')}</button>`}
+      ${canInterrupt(e) ? `<button class="btn stop" data-act="interrupt">⏹ ${t('interrupt')}</button>` : ''}
       <button class="btn wa" data-act="evwa">${icon('wa')} WhatsApp</button>
       <button class="btn ghost" data-act="evics">${icon('share')} ${t('shareIcs')}</button>
       ${e.source === 'birthday' ? '' : `<button class="btn ghost" data-act="evedit">${t('edit')}</button>`}
@@ -1375,6 +1456,9 @@ const actions = {
   evics: () => { const e = state.sheet.ev; P.shareFile(`${(e.title || 'rdv').slice(0, 40)}.ics`, buildICS(e, { lang: S().lang, hijriOffset: S().hijriOffset }), 'text/calendar', t('shareIcs')); },
   evedit: () => openEventEditor(state.sheet.ev),
   scope: (b) => { const d = state.sheet.draft; d.scope = b.dataset.scope; state.sheet = state.sheet.back; saveEdit(d); },
+  interrupt: () => { const ev = state.sheet.ev; openSheet({ kind: 'interrupt', ev, back: state.sheet }); },
+  intback: () => { state.sheet = state.sheet.back; renderSheet(); },
+  intdo: () => doInterrupt(),
   scopeback: () => { state.sheet = state.sheet.back; renderSheet(); },
   icontoggle: () => { readEditForm(); state.sheet.iconOpen = !state.sheet.iconOpen; renderSheet(); },
   seticon: (b) => { readEditForm(); state.sheet.draft.icon = b.dataset.v; state.sheet.iconOpen = false; renderSheet(); },

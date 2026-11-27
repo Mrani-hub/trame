@@ -355,3 +355,8 @@ export async function sendToKeep(title, text) {
   }
   return shareText(title, text);
 }
+
+/** Termine une série de l'agenda du téléphone à la date donnée (les occurrences suivantes disparaissent). */
+export async function endDeviceSeries(id, until) {
+  return TrameWidget.endSeries({ id: String(id), until });
+}

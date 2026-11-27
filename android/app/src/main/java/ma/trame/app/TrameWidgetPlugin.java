@@ -155,6 +155,38 @@ public class TrameWidgetPlugin extends Plugin {
         } catch (Exception e) { call.reject(e.getMessage()); }
     }
 
+    /** Termine une série répétitive à une date (UNTIL), en conservant le reste de sa règle. */
+    @PluginMethod
+    public void endSeries(PluginCall call) {
+        try {
+            long id = Long.parseLong(call.getString("id"));
+            long until = call.getLong("until");
+            ContentResolver cr = getContext().getContentResolver();
+            Uri uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id);
+            String rrule = null;
+            try (Cursor c = cr.query(uri, new String[]{CalendarContract.Events.RRULE}, null, null, null)) {
+                if (c != null && c.moveToFirst()) rrule = c.getString(0);
+            }
+            if (rrule == null || rrule.isEmpty()) { call.reject("not recurring"); return; }
+            StringBuilder nr = new StringBuilder();
+            for (String part : rrule.split(";")) {
+                String up = part.toUpperCase(java.util.Locale.ROOT);
+                if (up.startsWith("UNTIL=") || up.startsWith("COUNT=") || part.isEmpty()) continue;
+                if (nr.length() > 0) nr.append(';');
+                nr.append(part);
+            }
+            Calendar u = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+            u.setTimeInMillis(until);
+            nr.append(String.format(java.util.Locale.ROOT, ";UNTIL=%04d%02d%02dT%02d%02d%02dZ",
+                    u.get(Calendar.YEAR), u.get(Calendar.MONTH) + 1, u.get(Calendar.DAY_OF_MONTH),
+                    u.get(Calendar.HOUR_OF_DAY), u.get(Calendar.MINUTE), u.get(Calendar.SECOND)));
+            ContentValues v = new ContentValues();
+            v.put(CalendarContract.Events.RRULE, nr.toString());
+            cr.update(uri, v, null, null);
+            call.resolve();
+        } catch (Exception e) { call.reject(e.getMessage()); }
+    }
+
     /** Couleur d'un rendez-vous ("" = couleur de l'agenda). */
     @PluginMethod
     public void setEventColor(PluginCall call) {

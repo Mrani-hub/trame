@@ -254,3 +254,5 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; }
 .icell.on { background: color-mix(in srgb, var(--navy) 18%, transparent); outline: 2px solid var(--navy); }
 .deficons { display: flex; flex-wrap: wrap; gap: 6px; }
 .deficons .chip.on { outline: 2px solid var(--navy); }
+.btn.stop { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+.stopped { margin: 0 0 8px; color: var(--warn); font-weight: 600; font-size: 14px; }
